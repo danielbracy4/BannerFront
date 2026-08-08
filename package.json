@@ -1,0 +1,19 @@
+{
+  "name": "bannerfront",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Bannerfront — authoritative multiplayer game server",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/src/index.js",
+    "dev": "node server/src/index.js",
+    "smoke": "node server/test/smoke.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
+  }
+}

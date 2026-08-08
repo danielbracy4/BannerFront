@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- The filename never changes, so a browser will happily re-serve a stale
+     build and it looks like nothing was updated. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Bannerfront — a realm-conquest game</title>
+<style>
+  :root{
+    --ink:#241c12; --ink-soft:#4a3c2a; --parch:#e9dcba; --parch-2:#dbca9f;
+    --edge:#8a7448; --gold:#b8912f; --blood:#8c2f22; --deep:#141019;
+    --panel:rgba(28,22,15,.92); --panel-line:#6b5733;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#0d0b09;
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    color:var(--parch);-webkit-font-smoothing:antialiased;user-select:none}
+  canvas{display:block;position:absolute;inset:0;cursor:crosshair;touch-action:none}
+  button{font-family:inherit;color:inherit;cursor:pointer;background:none;border:none}
+
+  /* ---------- shared chrome ---------- */
+  .panel{background:var(--panel);border:1px solid var(--panel-line);
+    box-shadow:0 6px 24px rgba(0,0,0,.55), inset 0 0 0 1px rgba(233,220,186,.06);
+    border-radius:2px}
+  .cap{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#a08a5c}
+  .hud{position:absolute;inset:0;pointer-events:none;z-index:5}
+  .hud > *{pointer-events:auto}
+
+  /* ---------- top ---------- */
+  #topbar{position:absolute;top:0;left:50%;transform:translateX(-50%);
+    display:flex;align-items:center;gap:18px;padding:7px 20px;
+    border-top:none;border-radius:0 0 3px 3px;font-size:13px}
+  #topbar b{font-weight:600;color:#fff}
+  .tsep{width:1px;height:16px;background:var(--panel-line)}
+  #clock{font-variant-numeric:tabular-nums}
+
+  /* ---------- left: your realm ---------- */
+  #left{position:absolute;left:10px;top:10px;width:222px;padding:11px 13px 12px}
+  #myflag{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  #myswatch{width:16px;height:20px;flex:0 0 16px;border:1px solid rgba(0,0,0,.6);
+    clip-path:polygon(0 0,100% 0,100% 100%,50% 82%,0 100%)}
+  #myname{font-size:15px;line-height:1.1;color:#fff}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;
+    font-size:13px;padding:2px 0;font-variant-numeric:tabular-nums}
+  .stat .k{color:#9d8659;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  .bar{height:5px;background:#000a;border:1px solid #00000060;margin:5px 0 8px;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#6f8f45,#a7c06a);width:0%}
+  /* civilians / levies / soldiers, at a glance */
+  .bar3{display:flex;height:6px;background:#000a;border:1px solid #00000060;margin:5px 0 3px;overflow:hidden}
+  .bar3 i{display:block;height:100%;width:0%;transition:width .2s}
+  #bciv{background:linear-gradient(180deg,#7ea154,#5d7a3c)}
+  #blevy{background:linear-gradient(180deg,#d0a63f,#9c7a24)}
+  #bsold{background:linear-gradient(180deg,#c2604c,#8f4132)}
+  .mini{font-size:10.5px;color:#8f7c52;margin-bottom:7px;letter-spacing:.01em}
+  .warn{color:#d9714f !important}
+  #goldrow .v{color:var(--gold)}
+  #bldrow{display:block}
+  #bldrow .k{display:block;margin-bottom:2px}
+  #bldrow .v{display:block;line-height:1.4;font-size:12px}
+
+  /* ---------- right: leaderboard ---------- */
+  #right{position:absolute;right:10px;top:10px;width:238px;max-height:calc(100vh - 190px);
+    display:flex;flex-direction:column}
+  #rhead{padding:8px 12px 6px;border-bottom:1px solid var(--panel-line);display:flex;
+    justify-content:space-between;align-items:center}
+  #board{overflow-y:auto;padding:4px 0 6px}
+  .row{display:flex;align-items:center;gap:8px;padding:3px 12px;font-size:12.5px;cursor:pointer}
+  .row:hover{background:#ffffff10}
+  .row.me{background:#b8912f22}
+  .row.dead{opacity:.32}
+  .row .sw{width:9px;height:12px;flex:0 0 9px;border:1px solid #0007;
+    clip-path:polygon(0 0,100% 0,100% 100%,50% 80%,0 100%)}
+  .row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .pc{color:#a89566;font-variant-numeric:tabular-nums;font-size:11.5px}
+  .row .tag{font-size:9px;letter-spacing:.1em;color:#7fa86a}
+  .row .tag.war{color:#c9614f}
+
+  /* ---------- bottom command bar ---------- */
+  #bottom{position:absolute;bottom:0;left:50%;transform:translateX(-50%);z-index:7;
+    width:min(880px,calc(100vw - 20px));padding:9px 12px 10px;border-radius:3px 3px 0 0}
+  #ratiorow{display:flex;align-items:center;gap:12px;margin-bottom:9px}
+  #ratio{-webkit-appearance:none;appearance:none;flex:1;height:6px;background:#000a;
+    border:1px solid #00000070;outline:none}
+  #ratio::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:19px;cursor:grab;
+    background:linear-gradient(180deg,#d8b453,#8d6c20);border:1px solid #2a1f08;
+    clip-path:polygon(0 0,100% 0,100% 100%,50% 78%,0 100%)}
+  #ratiolab{font-size:12px;color:#a89566;min-width:150px;font-variant-numeric:tabular-nums}
+  #ratiolab b{color:#fff;font-weight:600}
+  /* build tray, grouped by kind */
+  #cats{display:flex;gap:6px}
+  .cat{flex:1;padding:7px 4px 6px;border:1px solid #5c4c2d;border-radius:2px;
+    background:linear-gradient(180deg,#2e2519,#1d1710);font-size:12.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:#e0d3b0;transition:border-color .12s,background .12s}
+  .cat:hover{border-color:var(--gold);color:#fff}
+  .cat.on{border-color:var(--gold);background:linear-gradient(180deg,#5b4718,#332711)}
+  .cat b{display:block;font-size:9.5px;letter-spacing:.03em;text-transform:none;
+    color:#9d8659;font-weight:400;margin-top:2px}
+  #tray{position:absolute;left:0;right:0;bottom:calc(100% + 6px);display:none;padding:5px;
+    background:#191309fa;border:1px solid var(--panel-line);border-radius:2px;
+    box-shadow:0 10px 30px rgba(0,0,0,.7)}
+  #tray.on{display:block}
+  #tray .th{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#a08a5c;
+    padding:4px 7px 7px}
+  .item{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;text-align:left;
+    border:1px solid transparent;border-radius:2px}
+  .item:hover:not(.off){border-color:var(--gold);background:#ffffff0c}
+  .item.off{opacity:.34;cursor:not-allowed}
+  .item .nm{font-size:13px;color:#eadfbe;min-width:104px}
+  .item .ds{flex:1;font-size:11.5px;color:#9d8659}
+  .item .cs{font-size:12px;color:var(--gold);font-variant-numeric:tabular-nums}
+  .prow{display:flex;align-items:center;gap:9px;padding:4px 9px}
+  .prow .pn{font-size:12.5px;color:#eadfbe;min-width:66px}
+  .prow .pri{-webkit-appearance:none;appearance:none;width:150px;height:5px;background:#000a;
+    border:1px solid #00000070;outline:none}
+  .prow .pri::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:16px;cursor:grab;
+    background:linear-gradient(180deg,#d8b453,#8d6c20);border:1px solid #2a1f08;
+    clip-path:polygon(0 0,100% 0,100% 100%,50% 78%,0 100%)}
+  .prow .pv{font-size:11.5px;color:var(--gold);min-width:118px;font-variant-numeric:tabular-nums}
+  .prow .pd{font-size:11px;color:#8a7750;flex:1}
+  #armed{display:none;align-items:center;gap:8px;padding:5px 9px;margin-bottom:8px;
+    border:1px dashed var(--gold);border-radius:2px;font-size:12px;color:#f0e4c4}
+  #armed.on{display:flex}
+  #armed b{color:#fff}
+  #armedX{margin-left:auto;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#a08a5c}
+  #armedX:hover{color:var(--gold)}
+  #hintrow{margin-top:7px;text-align:center;font-size:10.5px;letter-spacing:.06em;color:#6f5f3e}
+
+  /* right-click orders */
+  #ctx{position:absolute;display:none;min-width:224px;padding:5px;z-index:12}
+  #ctx.on{display:block}
+  #ctx .hd{padding:7px 9px 8px;border-bottom:1px solid var(--panel-line);margin-bottom:4px}
+  #ctx .hd .n{font-size:13.5px;color:#fff;line-height:1.2}
+  #ctx .hd .s{font-size:10.5px;color:#9d8659;letter-spacing:.06em;margin-top:2px}
+  .mi{display:flex;align-items:center;gap:9px;width:100%;padding:6px 9px;text-align:left;
+    font-size:12.5px;color:#e0d3b0;border-radius:2px}
+  .mi:hover:not(.off){background:#ffffff12;color:#fff}
+  .mi.off{opacity:.32;cursor:not-allowed}
+  .mi .cs{margin-left:auto;font-size:11.5px;color:var(--gold);font-variant-numeric:tabular-nums}
+  .msep{height:1px;background:var(--panel-line);margin:5px 7px}
+
+  /* ---------- log / toasts ---------- */
+  /* bounded top and bottom so a busy war never buries the panels */
+  #stack{position:absolute;left:10px;top:252px;bottom:124px;width:290px;display:flex;
+    flex-direction:column;justify-content:flex-end;gap:6px;pointer-events:none;overflow:hidden}
+  #log{display:flex;flex-direction:column-reverse;gap:4px;overflow:hidden;min-height:0}
+  .msg{background:rgba(20,16,11,.9);border-left:2px solid var(--edge);padding:5px 9px;
+    font-size:12px;line-height:1.35;color:#d6c8a5;animation:sl .25s ease-out}
+  .msg.war{border-left-color:var(--blood)}
+  .msg.good{border-left-color:#6f8f45}
+  .msg.big{border-left-color:var(--gold);color:#f0e4c4}
+  .msg b{color:#fff;font-weight:600}
+  @keyframes sl{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+  #asks{display:flex;flex-direction:column;gap:5px;pointer-events:auto}
+  .ask{background:rgba(30,24,14,.96);border:1px solid var(--gold);padding:8px 10px;font-size:12px}
+  .ask .btns{display:flex;gap:6px;margin-top:7px}
+  .ask button{flex:1;padding:4px 0;font-size:11px;border:1px solid #6b5733;background:#2a2115}
+  .ask button:hover{border-color:var(--gold)}
+
+  /* ---------- player popup ---------- */
+  #pop{position:absolute;width:212px;padding:10px 12px 11px;display:none;z-index:9}
+  #pop h4{font-size:14px;font-weight:600;color:#fff;margin-bottom:2px}
+  #pop .sub{font-size:11px;color:#9d8659;margin-bottom:8px}
+  #pop .st{display:flex;justify-content:space-between;font-size:12px;padding:1px 0;
+    font-variant-numeric:tabular-nums;color:#cbbb92}
+  #pop button{display:block;width:100%;margin-top:6px;padding:5px 0;font-size:11.5px;
+    border:1px solid #6b5733;background:#2a2115;letter-spacing:.06em}
+  #pop button:hover{border-color:var(--gold);color:#fff}
+  #pop button.dis{opacity:.35;pointer-events:none}
+
+  /* ---------- overlays ---------- */
+  .over{position:absolute;inset:0;z-index:20;display:flex;align-items:center;
+    justify-content:center;background:radial-gradient(ellipse at center,#1c1710f2,#080605fa)}
+  .card{width:min(640px,92vw);padding:34px 40px 30px;text-align:center}
+  .card h1{font-size:46px;letter-spacing:.16em;font-weight:400;color:#f2e6c6;
+    text-shadow:0 2px 0 #000,0 0 30px #b8912f40}
+  .card h1 span{color:var(--gold)}
+  .card .tag{font-size:12px;letter-spacing:.34em;text-transform:uppercase;color:#8e7a4f;margin-top:6px}
+  .card p{font-size:14px;line-height:1.6;color:#c3b590;margin:18px auto 0;max-width:470px}
+  .fields{display:flex;gap:10px;margin:22px 0 4px;text-align:left;flex-wrap:wrap}
+  .fld{flex:1 1 160px}
+  .fld label{display:block;font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:#8e7a4f;margin-bottom:4px}
+  .fld input,.fld select{width:100%;padding:7px 9px;background:#141009;color:#eadfbe;
+    border:1px solid #5c4c2d;font-family:inherit;font-size:13px;border-radius:2px}
+  .fld input:focus,.fld select:focus{outline:none;border-color:var(--gold)}
+  #swatches{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+  #swatches i{width:22px;height:22px;border:2px solid transparent;cursor:pointer;border-radius:2px}
+  #swatches i.sel{border-color:#fff}
+  .cta{margin-top:24px;padding:12px 44px;font-size:15px;letter-spacing:.24em;
+    text-transform:uppercase;border:1px solid var(--gold);color:#f2e6c6;
+    background:linear-gradient(180deg,#4a3a15,#2a2010)}
+  .cta:hover{background:linear-gradient(180deg,#6b5320,#3a2c14);color:#fff}
+  .hint{font-size:11px;color:#7b6a45;margin-top:16px;letter-spacing:.05em}
+  .build{font-size:10px;color:#5d5033;margin-top:9px;letter-spacing:.16em}
+  /* ---------- lobby + guide ---------- */
+  #lobbycard{width:min(880px,95vw);max-height:92vh;text-align:left;padding:18px 22px 16px;
+    display:flex;flex-direction:column;overflow:hidden}
+  #lobbyhead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  #lobbyhead .lh{font-size:26px;letter-spacing:.12em;color:#f2e6c6;text-transform:uppercase}
+  #lobbyhead .tag{margin-top:3px}
+  #lobbyclock{font-size:38px;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1}
+  #roster{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0 4px;min-height:22px}
+  .seat{display:flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid #4d3f26;
+    border-radius:2px;font-size:11.5px;color:#c3b590;background:#00000033;animation:sl .25s ease-out}
+  .seat i{width:7px;height:10px;clip-path:polygon(0 0,100% 0,100% 100%,50% 78%,0 100%)}
+  .seat.you{border-color:var(--gold);color:#fff}
+  .seat b{font-weight:400;font-size:9.5px;letter-spacing:.14em;color:#7f6c46}
+  #tabs{display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--panel-line);
+    margin-top:10px;padding-bottom:0}
+  .tab{padding:7px 16px 6px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:#8e7a4f;border:1px solid transparent;border-bottom:none;border-radius:2px 2px 0 0}
+  .tab:hover{color:#e0d3b0}
+  .tab.on{color:#f2e6c6;border-color:var(--panel-line);background:#00000040;margin-bottom:-1px}
+  #verlab{margin-left:auto;font-size:10px;letter-spacing:.18em;color:#6f5f3e}
+  /* An explicit cap rather than flex distribution: the card's height comes
+     from its content capped by max-height, so a flex child never gets a
+     definite box to shrink into and simply overflows the card instead. */
+  #tabbody{overflow-y:auto;padding:14px 14px 4px 4px;font-size:13px;line-height:1.62;
+    color:#cbbb92;flex:0 1 auto;min-height:0;max-height:54vh}
+  #tabbody h4{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+    margin:16px 0 6px}
+  #tabbody h4:first-child{margin-top:0}
+  #tabbody p{margin:0 0 9px;max-width:none;font-size:13px;line-height:1.62;color:#cbbb92}
+  #tabbody b{color:#f0e4c4;font-weight:600}
+  #tabbody .row2{display:flex;gap:10px;margin-bottom:5px}
+  #tabbody .row2 .lhs{flex:0 0 132px;color:#e8dcba}
+  #tabbody .row2 .rhs{flex:1}
+  #tabbody ul{margin:0 0 10px 16px}
+  #tabbody li{margin-bottom:4px}
+  #tabbody .ver{color:#f2e6c6;font-size:13.5px}
+  #tabbody .when{color:#7f6c46;font-size:11px;letter-spacing:.08em;margin-left:8px}
+  #tabbody .keys{display:inline-block;padding:0 5px;border:1px solid #5c4c2d;border-radius:2px;
+    font-size:11px;color:#e0d3b0;background:#00000050}
+  #lobbyfoot{display:flex;align-items:center;justify-content:space-between;gap:14px;
+    margin-top:12px;padding-top:11px;border-top:1px solid var(--panel-line)}
+  #dontshow{display:flex;align-items:center;gap:7px;font-size:12px;color:#a89566;cursor:pointer}
+  #dontshow input{accent-color:#b8912f;width:14px;height:14px;cursor:pointer}
+  #guideshut{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:12px;color:#8e7a4f}
+  #guideshut button{font-size:11.5px;letter-spacing:.1em;color:var(--gold);
+    border:1px solid #5c4c2d;padding:4px 12px;border-radius:2px}
+  #guideshut button:hover{border-color:var(--gold);color:#fff}
+
+  #banner{position:absolute;top:34%;left:50%;transform:translateX(-50%);text-align:center;
+    z-index:8;pointer-events:none;opacity:0;transition:opacity .4s}
+  #banner .t{font-size:30px;letter-spacing:.2em;color:#f2e6c6;text-shadow:0 2px 12px #000}
+  #banner .s{font-size:13px;letter-spacing:.3em;text-transform:uppercase;color:#b8912f;margin-top:6px}
+  .kbd{display:inline-block;padding:1px 6px;border:1px solid #5c4c2d;border-radius:2px;
+    font-size:11px;color:#c3b590;background:#00000050}
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+
+<div class="hud" id="hud" style="display:none">
+  <div id="topbar" class="panel">
+    <span class="cap">Leader</span><b id="tpct">0.0%</b>
+    <div class="tsep"></div>
+    <span class="cap">Lords</span><b id="tlords">0</b>
+    <div class="tsep"></div>
+    <span class="cap">Age</span><b id="clock">0:00</b>
+    <div class="tsep"></div>
+    <button id="speed" style="font-size:12px;letter-spacing:.1em">▶ 1×</button>
+  </div>
+
+  <aside id="left" class="panel">
+    <div id="myflag"><i id="myswatch"></i><div id="myname">—</div></div>
+    <div class="stat"><span class="k">People</span><span class="v" id="spop">0</span></div>
+    <div class="bar3"><i id="bciv"></i><i id="blevy"></i><i id="bsold"></i></div>
+    <div class="mini" id="smix">—</div>
+    <div class="stat"><span class="k">Soldiers</span><span class="v" id="ssold">0</span></div>
+    <div class="stat"><span class="k">Arms</span><span class="v" id="sarms">0</span></div>
+    <div class="stat" id="goldrow"><span class="k">Ducats</span><span class="v" id="sgold">0</span></div>
+    <div class="stat"><span class="k">Food</span><span class="v" id="sfood">0</span></div>
+    <div class="stat"><span class="k">Holdings</span><span class="v" id="stiles">0</span></div>
+    <div class="stat" id="bldrow" style="margin-top:7px"><span class="k">Works</span><span class="v" id="sbld">—</span></div>
+  </aside>
+
+  <aside id="right" class="panel">
+    <div id="rhead"><span class="cap">Great Houses</span><span class="cap" id="ralive"></span></div>
+    <div id="board"></div>
+  </aside>
+
+  <div id="bottom" class="panel">
+    <div id="tray"></div>
+    <div id="armed"><span id="armedTxt"></span><button id="armedX">Esc — cancel</button></div>
+    <div id="ratiorow">
+      <span class="cap">Soldiers sent</span>
+      <input id="ratio" type="range" min="1" max="100" value="35">
+      <span id="ratiolab"><b>35%</b> — 0 men</span>
+    </div>
+    <div id="cats"></div>
+    <div id="hintrow">right-click the map for orders — march, swear, build, besiege</div>
+  </div>
+  <div id="ctx" class="panel"></div>
+
+  <div id="stack">
+    <div id="log"></div>
+    <div id="asks"></div>
+  </div>
+  <div id="pop" class="panel"></div>
+  <div id="banner"><div class="t"></div><div class="s"></div></div>
+</div>
+
+<div class="over" id="start">
+  <div class="card panel">
+    <h1>BANNER<span>FRONT</span></h1>
+    <div class="tag">Claim the realm, one field at a time</div>
+    <p>Plant your standard on open ground. Your people work the fields, the forges and
+       the markets — and an army is only ever what that economy can arm and pay for.
+       Take <b id="wintxt">65%</b> of the realm, or be the last banner flying.</p>
+    <div class="fields">
+      <div class="fld"><label>Your house</label><input id="inName" maxlength="18" placeholder="House Vareth"></div>
+      <div class="fld"><label>Rival lords</label>
+        <select id="inBots">
+          <option value="14">14 — Skirmish</option>
+          <option value="26">26 — Border war</option>
+          <option value="40" selected>40 — The Long War</option>
+          <option value="60">60 — Bloodbath</option>
+        </select>
+      </div>
+      <div class="fld"><label>Realm</label>
+        <select id="inMap">
+          <option value="continents" selected>Continents</option>
+          <option value="pangaea">Pangaea</option>
+          <option value="isles">Broken Isles</option>
+          <option value="valley">Great Valley</option>
+        </select>
+      </div>
+      <div class="fld" style="flex:1 1 100%"><label>Colours</label><div id="swatches"></div></div>
+    </div>
+    <button class="cta" id="btnPlay">Muster</button>
+    <div class="hint">drag to pan · scroll to zoom · left-click to march · right-click for orders</div>
+    <div class="build" id="buildlab">—</div>
+  </div>
+</div>
+
+<div class="over" id="lobby" style="display:none">
+  <div class="card panel" id="lobbycard">
+    <div id="lobbyhead">
+      <div>
+        <div class="lh">Mustering the host</div>
+        <div class="tag" id="lobbysub">lords are riding in — the war begins when the horn sounds</div>
+      </div>
+      <div id="lobbyclock">1:00</div>
+    </div>
+    <div id="roster"></div>
+    <div id="guide">
+      <div id="tabs">
+        <button class="tab on" data-t="play">How to play</button>
+        <button class="tab" data-t="log">What's new</button>
+        <span id="verlab"></span>
+      </div>
+      <div id="tabbody"></div>
+    </div>
+    <div id="guideshut" style="display:none">
+      <span>The guide is hidden. It will return whenever the game changes.</span>
+      <button id="btnGuide">Show it now</button>
+    </div>
+    <div id="lobbyfoot">
+      <label id="dontshow"><input type="checkbox" id="cbHelp"> Don't show this again</label>
+      <button class="cta" id="btnBegin" style="margin-top:0;padding:10px 34px">Begin now</button>
+    </div>
+  </div>
+</div>
+
+<div class="over" id="over" style="display:none">
+  <div class="card panel">
+    <h1 id="ovTitle">—</h1>
+    <div class="tag" id="ovTag"></div>
+    <p id="ovText"></p>
+    <button class="cta" id="btnAgain">New War</button>
+  </div>
+</div>
+
+<script src="shared/core.js"></script>
+<script>
+"use strict";
+// ============================================================== presentation
+const $ = id => document.getElementById(id);
+const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
+
+let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
+let pcol = [];                       // per-lord rgb, precomputed
+let cam = { x: 0, y: 0, z: 3 };
+let mode = 'attack', modeArg = null;
+let hover = -1, hoverTile = -1;
+let speed = 1, running = false;
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+
+function fit(){
+  cv.width = Math.floor(innerWidth * DPR); cv.height = Math.floor(innerHeight * DPR);
+  cv.style.width = innerWidth + 'px'; cv.style.height = innerHeight + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', () => { fit(); if (game) clampCam(); }); fit();
+
+// ------------------------------------------------------------- tile colours
+function hex(c){ return [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)]; }
+
+function buildBase(){
+  const N = game.N;
+  baseRGB = new Uint8Array(N * 3);
+  for (let t = 0; t < N; t++){
+    const e = game.elev[t], k = game.terrain[t];
+    const n = (hash2(t % game.W, (t / game.W) | 0, 7) - 0.5) * 14;
+    let r, g, b;
+    // An inked map on aged vellum: wheat-coloured ground, sage woods, ochre
+    // uplands, a flat blue-grey wash for the sea.
+    const pk = game.peakByte || 190;
+    if (k === T_SEA){        const f = Math.pow(Math.min(1, e / Math.max(1, pk * 0.6)), 1.4);
+                             r = 21 + f*17; g = 35 + f*26; b = 53 + f*33; }
+    else if (k === T_SHOAL){ r = 62 + n*0.5; g = 92 + n*0.5; b = 112 + n*0.5; }
+    else if (k === T_PLAIN){ r = 205 + n; g = 189 + n; b = 147 + n; }
+    else if (k === T_WOOD){  r = 133 + n*0.8; g = 151 + n*0.8; b = 107 + n*0.8; }
+    else if (k === T_HILL){  r = 189 + n; g = 165 + n; b = 119 + n; }
+    else {                   const f = Math.pow(Math.max(0, Math.min(1, (e - pk) / Math.max(1, 255 - pk))), 0.85);
+                             r = 183 + f*46 + n*0.6; g = 177 + f*47 + n*0.6; b = 165 + f*50 + n*0.6; }
+    const i = t * 3;
+    baseRGB[i] = r; baseRGB[i+1] = g; baseRGB[i+2] = b;
+  }
+}
+
+function buildPalette(){
+  pcol = game.players.map(p => {
+    const [r, g, b] = hex(p.color);
+    return { r, g, b, lr: r + (255-r)*0.30, lg: g + (255-g)*0.30, lb: b + (255-b)*0.30 };
+  });
+}
+
+function paint(t){
+  const i3 = t * 3, i4 = t * 4, d = mapImg.data;
+  const o = game.owner[t];
+  let r = baseRGB[i3], g = baseRGB[i3+1], b = baseRGB[i3+2];
+  if (o >= 0){
+    const c = pcol[o];
+    if (game.players[o].border.has(t)){
+      r = r*0.06 + c.lr*0.94; g = g*0.06 + c.lg*0.94; b = b*0.06 + c.lb*0.94;
+    } else {
+      r = r*0.28 + c.r*0.72; g = g*0.28 + c.g*0.72; b = b*0.28 + c.b*0.72;
+    }
+  }
+  const cf = game.castleField[t];
+  if (cf){ const k = 1 - Math.min(3, cf) * 0.075; r *= k; g *= k; b *= k; }
+  d[i4] = r; d[i4+1] = g; d[i4+2] = b; d[i4+3] = 255;
+}
+
+function repaintAll(){ for (let t = 0; t < game.N; t++) paint(t); }
+
+function flushMap(){
+  if (game.dirtyAll){ repaintAll(); game.dirtyAll = false; game.dirty.length = 0; mapCtx.putImageData(mapImg, 0, 0); return; }
+  const d = game.dirty;
+  if (!d.length) return;
+  for (let i = 0; i < d.length; i++) paint(d[i]);
+  d.length = 0;
+  mapCtx.putImageData(mapImg, 0, 0);
+}
+
+// ------------------------------------------------------------------- camera
+function fitZoom(){ return Math.min(innerWidth / game.W, innerHeight / game.H); }
+function clampCam(){
+  const z = cam.z, halfW = innerWidth / 2 / z, halfH = innerHeight / 2 / z;
+  const mx = Math.max(0, game.W / 2 - halfW), my = Math.max(0, game.H / 2 - halfH);
+  cam.x = Math.min(game.W / 2 + mx, Math.max(game.W / 2 - mx, cam.x));
+  cam.y = Math.min(game.H / 2 + my, Math.max(game.H / 2 - my, cam.y));
+}
+const sx = mx => (mx - cam.x) * cam.z + innerWidth / 2;
+const sy = my => (my - cam.y) * cam.z + innerHeight / 2;
+const mxOf = px => (px - innerWidth / 2) / cam.z + cam.x;
+const myOf = py => (py - innerHeight / 2) / cam.z + cam.y;
+function tileAt(px, py){
+  const x = Math.floor(mxOf(px)), y = Math.floor(myOf(py));
+  if (x < 0 || y < 0 || x >= game.W || y >= game.H) return -1;
+  return y * game.W + x;
+}
+
+// -------------------------------------------------------------- map symbols
+function symbol(c, type, x, y, s, col){
+  c.save(); c.translate(x, y);
+  c.lineWidth = Math.max(1, s * 0.13); c.lineJoin = 'round';
+  c.strokeStyle = 'rgba(15,11,7,.85)'; c.fillStyle = col;
+  const h = s;
+  c.beginPath();
+  if (type === B_TOWN){
+    c.moveTo(-h, h*0.7); c.lineTo(-h, -h*0.2); c.lineTo(0, -h); c.lineTo(h, -h*0.2); c.lineTo(h, h*0.7); c.closePath();
+  } else if (type === B_CASTLE){
+    c.moveTo(-h, h*0.8); c.lineTo(-h, -h*0.35); c.lineTo(-h*0.55, -h*0.35); c.lineTo(-h*0.55, -h*0.85);
+    c.lineTo(-h*0.18, -h*0.85); c.lineTo(-h*0.18, -h*0.35); c.lineTo(h*0.18, -h*0.35); c.lineTo(h*0.18, -h*0.85);
+    c.lineTo(h*0.55, -h*0.85); c.lineTo(h*0.55, -h*0.35); c.lineTo(h, -h*0.35); c.lineTo(h, h*0.8); c.closePath();
+  } else if (type === B_HARBOR){
+    c.arc(0, 0, h*0.85, 0, Math.PI); c.moveTo(0, -h); c.lineTo(0, h*0.85);
+    c.moveTo(-h*0.55, -h*0.6); c.lineTo(h*0.55, -h*0.6);
+    c.strokeStyle = col; c.lineWidth = Math.max(1.2, s*0.3); c.stroke(); c.restore(); return;
+  } else if (type === B_FARM){
+    c.moveTo(-h, h*0.85); c.lineTo(-h, -h*0.1); c.lineTo(0, -h); c.lineTo(h, -h*0.1); c.lineTo(h, h*0.85); c.closePath();
+  } else if (type === B_FORGE){
+    c.moveTo(-h, h*0.85); c.lineTo(h, h*0.85); c.lineTo(h*0.7, h*0.2); c.lineTo(-h*0.7, h*0.2); c.closePath();
+    c.moveTo(-h*0.3, h*0.2); c.lineTo(-h*0.3, -h*0.5); c.lineTo(h*0.95, -h); c.lineTo(h*0.95, -h*0.45); c.closePath();
+  } else if (type === B_SIEGE){
+    c.moveTo(-h, h*0.8); c.lineTo(h, h*0.8); c.lineTo(h*0.1, -h); c.closePath();
+  } else {
+    c.moveTo(-h*0.55, h*0.9); c.lineTo(-h*0.55, -h*0.6); c.lineTo(0, -h); c.lineTo(h*0.55, -h*0.6);
+    c.lineTo(h*0.55, h*0.9); c.closePath();
+  }
+  c.fill(); c.stroke(); c.restore();
+}
+
+// ------------------------------------------------------------------- render
+function render(now){
+  const c = ctx, W = innerWidth, H = innerHeight;
+  c.fillStyle = '#0a141f'; c.fillRect(0, 0, W, H);   // open sea beyond the map
+  if (!game){ return; }
+  clampCam();
+  flushMap();
+  c.imageSmoothingEnabled = false;
+  c.drawImage(mapCv, 0, 0, game.W, game.H,
+              Math.round(sx(0)), Math.round(sy(0)),
+              Math.round(game.W * cam.z), Math.round(game.H * cam.z));
+
+  const z = cam.z;
+  const vx0 = mxOf(0) - 2, vx1 = mxOf(W) + 2, vy0 = myOf(0) - 2, vy1 = myOf(H) + 2;
+
+  // structures
+  if (z > 1.6){
+    const s = Math.max(2.2, Math.min(7.5, z * 1.2));
+    c.globalAlpha = 0.88;
+    for (const p of game.players){
+      if (!p.alive) continue;
+      const col = '#efe3c4';
+      for (const type of B_ALL){
+        for (const t of p.st[type]){
+          const x = t % game.W, y = (t / game.W) | 0;
+          if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
+          symbol(c, type, sx(x + 0.5), sy(y + 0.5), s, col);
+        }
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  // ships
+  for (const b of game.boats){
+    const x = sx(b.x + 0.5), y = sy(b.y + 0.5);
+    if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
+    const r = Math.max(2.4, z * 1.1);
+    c.save(); c.translate(x, y);
+    c.fillStyle = b.kind === 'trade' ? '#e8d9a8' : game.players[b.owner].color;
+    c.strokeStyle = 'rgba(10,8,5,.8)'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(-r*1.5, 0); c.lineTo(0, -r*0.8); c.lineTo(r*1.5, 0); c.lineTo(0, r*0.8); c.closePath();
+    c.fill(); c.stroke();
+    if (b.kind === 'galley'){ c.fillStyle = '#fff'; c.fillRect(-0.6, -r*1.9, 1.2, r*1.6); }
+    c.restore();
+  }
+
+  // sieges: the invested ring, and how long the camp has left to run
+  for (const s of game.sieges){
+    const S = SIEGE[s.kind];
+    const px = sx(s.tile % game.W + 0.5), py = sy(((s.tile / game.W) | 0) + 0.5);
+    if (px < -200 || py < -200 || px > W + 200 || py > H + 200) continue;
+    const col = game.players[s.owner].color;
+    c.strokeStyle = 'rgba(226,178,96,.5)'; c.lineWidth = 1.2; c.setLineDash([5, 5]);
+    c.beginPath(); c.arc(px, py, S.r * z, 0, 7); c.stroke(); c.setLineDash([]);
+    c.strokeStyle = 'rgba(226,178,96,.9)'; c.lineWidth = 2.4;
+    c.beginPath(); c.arc(px, py, Math.max(6, z * 1.9), -Math.PI / 2,
+                         -Math.PI / 2 + Math.PI * 2 * Math.min(1, 1 - s.t / s.dur)); c.stroke();
+    symbol(c, B_SIEGE, px, py, Math.max(3, Math.min(8, z * 1.3)), col);
+  }
+
+  vignette(c, W, H);
+
+  // banners: house name + levy over each realm
+  const me = game.humanId >= 0 ? game.players[game.humanId] : null;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (const p of game.players){
+    if (!p.alive || p.tiles < 12) continue;
+    const px = sx(p.cx + 0.5), py = sy(p.cy + 0.5);
+    if (px < -80 || py < -40 || px > W + 80 || py > H + 40) continue;
+    const span = Math.sqrt(p.tiles) * z;
+    if (span < 26) continue;
+    const fs = Math.max(9, Math.min(21, span * 0.19));
+    c.font = `${fs}px "Iowan Old Style", Palatino, Georgia, serif`;
+    c.lineWidth = Math.max(2, fs * 0.28); c.strokeStyle = 'rgba(0,0,0,.72)';
+    c.strokeText(p.name, px, py - fs * 0.55);
+    c.fillStyle = p === me ? '#ffd465' : '#f2ead4';
+    c.fillText(p.name, px, py - fs * 0.55);
+    c.font = `${fs * 0.86}px "Iowan Old Style", Palatino, Georgia, serif`;
+    const lab = fmt(p.pop) + (p.committed > 0 ? ' ⚔' + fmt(p.committed) : '');
+    c.strokeText(lab, px, py + fs * 0.62);
+    c.fillStyle = p.allies.has(game.humanId) ? '#a9e08c' : '#dccfae';
+    c.fillText(lab, px, py + fs * 0.62);
+  }
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+
+  // cursor readout
+  if (hoverTile >= 0 && mode === 'attack'){
+    const o = game.owner[hoverTile];
+    if (o >= 0 && o !== game.humanId){
+      const q = game.players[o];
+      const lab = `${q.name} · ${fmt(q.pop)} men`;
+      c.font = '12px "Iowan Old Style", Palatino, Georgia, serif';
+      const w = c.measureText(lab).width + 14;
+      c.fillStyle = 'rgba(16,12,8,.88)'; c.fillRect(mouse.x + 14, mouse.y + 12, w, 20);
+      c.fillStyle = q.color; c.fillRect(mouse.x + 14, mouse.y + 12, 3, 20);
+      c.fillStyle = '#e9dcba'; c.fillText(lab, mouse.x + 24, mouse.y + 26);
+    }
+  }
+  // build ghost
+  if (mode.startsWith('build') && hoverTile >= 0){
+    const type = modeArg, x = (hoverTile % game.W) + 0.5, y = ((hoverTile / game.W) | 0) + 0.5;
+    const ok = game.owner[hoverTile] === game.humanId && !game.build[hoverTile] &&
+               (!BUILDS[type].needCoast || me.coast.has(hoverTile));
+    c.globalAlpha = 0.85;
+    symbol(c, type, sx(x), sy(y), Math.max(4, z * 1.6), ok ? '#bfe89a' : '#e08b7a');
+    c.globalAlpha = 1;
+  }
+  if (mode === 'siege' && hoverTile >= 0){
+    const S = SIEGE[modeArg];
+    c.strokeStyle = 'rgba(255,140,80,.75)'; c.setLineDash([4, 4]); c.lineWidth = 1.5;
+    c.beginPath(); c.arc(sx((hoverTile % game.W) + 0.5), sy(((hoverTile / game.W) | 0) + 0.5), S.r * z, 0, 7);
+    c.stroke(); c.setLineDash([]);
+  }
+}
+
+let vig = null, vigKey = '';
+function vignette(c, W, H){
+  const key = W + 'x' + H;
+  if (key !== vigKey){
+    vigKey = key;
+    vig = c.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.34, W/2, H/2, Math.max(W, H) * 0.78);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(24,16,8,0.44)');
+  }
+  c.fillStyle = vig; c.fillRect(0, 0, W, H);
+}
+
+function fmt(n){
+  n = Math.round(n);
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e4) return (n / 1e3).toFixed(1) + 'k';
+  return n.toLocaleString('en-US');
+}
+
+// -------------------------------------------------------------------- input
+const mouse = { x: 0, y: 0 };
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;               // right button belongs to the orders menu
+  drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: 0 };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (drag){
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.moved = Math.max(drag.moved, Math.abs(dx) + Math.abs(dy));
+    if (drag.moved > 4){ cam.x = drag.cx - dx / cam.z; cam.y = drag.cy - dy / cam.z; clampCam(); }
+  }
+  if (game) hoverTile = tileAt(e.clientX, e.clientY);
+});
+cv.addEventListener('pointerup', e => {
+  if (e.button !== 0) return;
+  const wasDrag = drag && drag.moved > 4;
+  drag = null;
+  if (!wasDrag && game) onClick(e.clientX, e.clientY);
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (!game) return;
+  const before = { x: mxOf(e.clientX), y: myOf(e.clientY) };
+  const k = Math.exp(-e.deltaY * 0.0016);
+  cam.z = Math.max(fitZoom() * 0.95, Math.min(16, cam.z * k));
+  cam.x = before.x - (e.clientX - innerWidth / 2) / cam.z;
+  cam.y = before.y - (e.clientY - innerHeight / 2) / cam.z;
+  clampCam();
+}, { passive: false });
+cv.addEventListener('contextmenu', e => { e.preventDefault(); openCtx(e.clientX, e.clientY); });
+// --------------------------------------------------------------- tool icons
+const ICON = {
+  town:  '<path d="M2 13V7l6-5 6 5v6z"/>',
+  castle:'<path d="M2 14V4h2.4v2.2h2.2V4h2.8v2.2h2.2V4H16v10z"/>',
+  harbor:'<g fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="3.4" r="1.6"/><path d="M8 5v9M4.6 7h6.8M2.6 10.5a5.6 5.6 0 0 0 10.8 0"/></g>',
+  siege: '<path d="M2 11.6h12v2.2H2z"/><path d="M4.4 9.4h7.2l-1 2.2H5.4z"/><path d="M7 2.4h2v6.4H7z"/><path d="M3.6 3.2h4.2v2.2H3.6z"/>',
+  tower: '<path d="M4.5 15V5.6L8 2l3.5 3.6V15z"/><path d="M6.6 8.4h2.8v3H6.6z" fill="#1d1710"/>',
+  farm:  '<path d="M1 14.2h14v1.6H1z"/><path d="M2.6 13V7.4L8 3.2l5.4 4.2V13z"/><path d="M6.2 13V9.6h3.6V13z" fill="#1d1710"/>',
+  forge: '<path d="M1.6 13.4h12.8v2.2H1.6z"/><path d="M3.8 11.2h8.4l-1.2 2.2H5z"/><path d="M9.4 1.4l4.4 2.4-1 1.8-4.4-2.4z"/><path d="M6.6 4.6h2.2v6.6H6.6z"/>',
+  ram:   '<path d="M1 7.4h10.5v3.2H1z"/><path d="M11.5 6.2h3.4v5.6h-3.4z"/><circle cx="3.6" cy="13.2" r="1.7"/><circle cx="9.4" cy="13.2" r="1.7"/>',
+  camp:  '<path d="M4.6 2.8 9.2 13.4H0z"/><path d="M11.2 5.6 16 13.4H6.4z"/>',
+  ship:  '<path d="M1 10h14l-2.2 4.4H3.2z"/><path d="M8 1.4 8 9.2M8.6 2.2c2.6.6 4 2 4.4 3.4-2 .3-3.4-.2-4.4-1z"/>',
+  galley:'<path d="M.8 9.6h14.4L13 14.4H2.9z"/><path d="M5 1.6v7.2M11 3v5.8M5.6 2.4c2 .5 3 1.5 3.4 2.6-1.6.3-2.6-.1-3.4-.8z"/><circle cx="11" cy="1.8" r="1.2"/>',
+  treb:  '<circle cx="8" cy="9.5" r="4.4"/><path d="M3 3.6 6 6M13 3.6 10 6M8 1.6v3"/>',
+  fire:  '<path d="M8.4 1c2.4 3.3.6 4.4 1.9 6 .9-.5 1.2-1.6 1.2-1.6 2.6 3.6.6 9.6-3.6 9.6-3 0-5-2.2-5-5 0-3.4 3.6-4.2 5.5-9z"/>',
+  plague:'<path d="M8 1.2c3.4 0 5.6 2.3 5.6 5.3 0 1.9-.9 3-1.8 3.7v2.2H4.2v-2.2C3.3 9.5 2.4 8.4 2.4 6.5 2.4 3.5 4.6 1.2 8 1.2z"/><circle cx="5.9" cy="6.6" r="1.5" fill="#1d1710"/><circle cx="10.1" cy="6.6" r="1.5" fill="#1d1710"/><path d="M5 14.2h6v1.4H5z"/>',
+};
+const svg = k => `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" style="display:block;flex:0 0 16px">${ICON[k]}</svg>`;
+const noIcon = '<i style="display:block;flex:0 0 16px"></i>';
+
+const TOOLS = [
+  { k:'farm',   cat:'works', kind:'build', arg:B_FARM,   name:'Farm',        hint:'feeds the realm — food is what grows your people' },
+  { k:'forge',  cat:'works', kind:'build', arg:B_FORGE,  name:'Blacksmith',  hint:'the only source of arms; unarmed men fight at a third' },
+  { k:'town',   cat:'works', kind:'build', arg:B_TOWN,   name:'Town',        hint:'trade, tax and the jobs your people work' },
+  { k:'castle', cat:'works', kind:'build', arg:B_CASTLE, name:'Castle',      hint:'fortifies the ground around it' },
+  { k:'harbor', cat:'works', kind:'build', arg:B_HARBOR, name:'Harbour',     hint:'trade coin, and ships to launch' },
+  { k:'siege',  cat:'works', kind:'build', arg:B_SIEGE,  name:'Siege Works', hint:'lets you loose siege engines' },
+  { k:'tower',  cat:'works', kind:'build', arg:B_TOWER,  name:'Watchtower',  hint:'may bring down incoming siege' },
+  { k:'ship',   cat:'ships', kind:'ship',  arg:400,      name:'Longship',    hint:'carries your levy to a distant shore' },
+  { k:'galley', cat:'ships', kind:'galley',arg:1000,     name:'War Galley',  hint:'holds water, sinks what passes' },
+  { k:'ram',    cat:'siege', kind:'siege', arg:'ram',    name:'Battering Ram', hint:'breaks a gate — invests the ground close by' },
+  { k:'treb',   cat:'siege', kind:'siege', arg:'treb',   name:'Trebuchet',     hint:'batters walls down across a province' },
+  { k:'camp',   cat:'siege', kind:'siege', arg:'camp',   name:'Siege Camp',    hint:'invests a whole march until it starves' },
+];
+const CATS = [
+  { id:'realm', name:'Realm', sub:'workers and mobilisation' },
+  { id:'works', name:'Works', sub:'farms, forges, towns, castles' },
+  { id:'ships', name:'Ships', sub:'longships and galleys' },
+  { id:'siege', name:'Siege', sub:'laid on your own frontier' },
+];
+
+function toolCost(t){
+  const me = game.players[game.humanId];
+  if (t.kind === 'build') return me.costOf(t.arg);
+  if (t.kind === 'siege') return SIEGE[t.arg].cost;
+  return t.arg;
+}
+function toolReady(t){
+  const me = game.players[game.humanId];
+  if (me.ducats < toolCost(t)) return false;
+  if (t.kind === 'siege' && !me.st[B_SIEGE].size) return false;
+  if ((t.kind === 'ship' || t.kind === 'galley') && !me.coast.size) return false;
+  return true;
+}
+
+let openCat = null, trayKey = '';
+function buildTools(){
+  $('cats').innerHTML = CATS.map(c =>
+    `<button class="cat" data-c="${c.id}">${c.name}<b>${c.sub}</b></button>`).join('');
+  $('cats').onclick = e => {
+    const b = e.target.closest('.cat'); if (!b) return;
+    showTray(b.dataset.c === openCat ? null : b.dataset.c);
+  };
+  $('tray').onclick = e => {
+    if (openCat === 'realm') return;
+    const b = e.target.closest('.item'); if (!b || b.classList.contains('off')) return;
+    const t = TOOLS[+b.dataset.i];
+    setMode(t.kind === 'build' ? 'build' : t.kind, t.arg);
+    showTray(null);
+  };
+  $('armedX').onclick = () => setMode('attack');
+}
+function showTray(cat){
+  openCat = cat; trayKey = '';
+  $('tray').classList.toggle('on', !!cat);
+  for (const b of $('cats').children) b.classList.toggle('on', b.dataset.c === cat);
+  if (cat) renderTray();
+}
+// The economy panel. Priorities are relative weights, not percentages of
+// anything — civilians are spread across the sectors in proportion, then capped
+// by how many jobs the works actually offer. "staffed" is the number that
+// matters: a priority with no building behind it employs nobody.
+const PRI = [
+  { k:'farm',  name:'Farms',   note:'food, and so population' },
+  { k:'forge', name:'Forges',  note:'arms for your soldiers' },
+  { k:'trade', name:'Trade',   note:'ducats' },
+  { k:'works', name:'Works',   note:'cheaper building' },
+];
+function renderRealmTray(){
+  const me = game.players[game.humanId];
+  const rows = PRI.map(s => `
+    <div class="prow">
+      <span class="pn">${s.name}</span>
+      <input class="pri" type="range" min="0" max="100" value="${Math.round(me.w[s.k] * 100)}" data-w="${s.k}">
+      <span class="pv" data-sv="${s.k}">—</span>
+      <span class="pd">${s.note}</span>
+    </div>`).join('');
+  $('tray').innerHTML = `<div class="th">Realm — where your people work</div>${rows}
+    <div class="th" style="padding-top:9px">Army — every soldier is a worker lost</div>
+    <div class="prow"><span class="pn">Standing</span>
+      <input class="pri" type="range" min="0" max="40" value="${Math.round(me.standing * 100)}" data-a="standing">
+      <span class="pv" data-sv="standing">—</span>
+      <span class="pd">professionals, always ready, always paid</span></div>
+    <div class="prow"><span class="pn">Mobilise</span>
+      <input class="pri" type="range" min="0" max="60" value="${Math.round(me.mobil * 100)}" data-a="mobil">
+      <span class="pv" data-sv="mobil">—</span>
+      <span class="pd">emergency levies — they must train, and be armed</span></div>`;
+  $('tray').querySelectorAll('input.pri').forEach(el => {
+    el.addEventListener('input', () => {
+      const m = game.players[game.humanId];
+      if (el.dataset.w) m.w[el.dataset.w] = +el.value / 100;
+      else m[el.dataset.a] = +el.value / 100;
+      realmReadouts();
+    });
+  });
+  realmReadouts();
+}
+function realmReadouts(){
+  const me = game.players[game.humanId], cap = me.jobCap;
+  let total = 0; for (const s of SECTORS) total += me.w[s];
+  for (const s of PRI){
+    const el = $('tray').querySelector(`[data-sv="${s.k}"]`);
+    if (!el) continue;
+    const share = total > 0 ? me.w[s.k] / total : 0;
+    const staffed = cap[s.k] > 0 ? Math.min(1, (me.jobs[s.k] || 0) / cap[s.k]) : 0;
+    el.innerHTML = `${(share * 100).toFixed(0)}%`
+      + (cap[s.k] > 0
+          ? ` <span style="color:${staffed > 0.95 ? '#8fae62' : '#a89566'}">${fmt(me.jobs[s.k] || 0)} of ${fmt(cap[s.k])}</span>`
+          : ` <span class="warn">no works</span>`);
+  }
+  for (const a of ['standing', 'mobil']){
+    const el = $('tray').querySelector(`[data-sv="${a}"]`);
+    if (el) el.textContent = Math.round(me[a] * 100) + '%';
+  }
+}
+
+function renderTray(){
+  if (openCat === 'realm') return renderRealmTray();
+  const cat = CATS.find(x => x.id === openCat);
+  const rows = TOOLS.map((t, i) => ({ t, i })).filter(o => o.t.cat === openCat).map(({ t, i }) =>
+    `<button class="item ${toolReady(t) ? '' : 'off'}" data-i="${i}">${svg(t.k)}
+      <span class="nm">${t.name}</span><span class="ds">${t.hint}</span>
+      <span class="cs">${toolCost(t)}c</span></button>`).join('');
+  $('tray').innerHTML = `<div class="th">${cat.name} — ${cat.sub}</div>${rows}`;
+}
+function refreshTools(){
+  const armed = mode !== 'attack';
+  $('armed').classList.toggle('on', armed);
+  if (armed){
+    const what = mode === 'build'  ? 'Placing a ' + BUILDS[modeArg].name
+               : mode === 'siege'  ? 'Laying a ' + SIEGE[modeArg].name.toLowerCase()
+               : mode === 'ship'   ? 'Launching a longship' : 'Sending a war galley';
+    const where = mode === 'build' ? 'click your own ground'
+                : mode === 'siege' ? 'click the ground to invest'
+                : mode === 'ship'  ? 'click the shore to land on' : 'click open water';
+    $('armedTxt').innerHTML = `<b>${what}</b> — ${where}`;
+  }
+  if (openCat && openCat !== 'realm'){
+    const key = TOOLS.filter(t => t.cat === openCat)
+                     .map(t => toolCost(t) + (toolReady(t) ? 'y' : 'n')).join('|');
+    if (key !== trayKey){ trayKey = key; renderTray(); }
+  }
+}
+function setMode(m, arg){
+  mode = m; modeArg = arg === undefined ? null : arg;
+  cv.style.cursor = m === 'attack' ? 'crosshair' : 'copy';
+  if (m !== 'attack') showTray(null);
+  refreshTools();
+}
+
+// ------------------------------------------------------------------- clicks
+const ratioVal = () => +$('ratio').value / 100;
+
+function nearestCoast(me, tx, ty){
+  let best = -1, bd = 1e18;
+  for (const t of me.coast){
+    const d = (t % game.W - tx) ** 2 + (((t / game.W) | 0) - ty) ** 2;
+    if (d < bd){ bd = d; best = t; }
+  }
+  return best;
+}
+
+// Each order is a function of a tile, so the command bar and the right-click
+// menu drive exactly the same code.
+function actAttack(t){
+  const me = game.players[game.humanId];
+  if (!game.isLand(t)) return false;
+  const o = game.owner[t];
+  if (o === me.id) return false;
+  if (o >= 0 && me.allies.has(o)){
+    toast(`You are sworn to ${game.players[o].name}. Break the pact first.`); return false;
+  }
+  const troops = Math.floor(me.sold * ratioVal());
+  if (troops < 10){ toast('You have no soldiers to send.'); return false; }
+  if (!game.launch(me.id, o, troops)){
+    toast(o >= 0 ? `No border with ${game.players[o].name} — sail a longship instead.`
+                 : 'No open ground touches your lands.');
+    return false;
+  }
+  if (o >= 0) toast(`You march on <b>${game.players[o].name}</b>.`, 'war');
+  return true;
+}
+function actBuild(t, type){
+  const err = game.place(game.humanId, t, type);
+  if (err){ toast(err); return false; }
+  toast(`${BUILDS[type].name} raised.`, 'good');
+  return true;
+}
+// You point at the ground you want invested; the camp goes up on your own
+// frontier nearest to it. If your men aren't close enough, there is no siege.
+function actSiege(t, kind){
+  const me = game.players[game.humanId];
+  let spot = t, best = 1e18;
+  if (game.owner[t] !== me.id || !me.border.has(t)){
+    const tx = t % game.W, ty = (t / game.W) | 0;
+    spot = -1;
+    for (const b of me.border){
+      if (game.build[b]) continue;
+      const d = (b % game.W - tx) ** 2 + (((b / game.W) | 0) - ty) ** 2;
+      if (d < best){ best = d; spot = b; }
+    }
+    if (spot < 0 || Math.sqrt(best) > CFG.SIEGE_REACH){
+      toast('Your men are not close enough to invest that ground.');
+      return false;
+    }
+  }
+  const err = game.raise(me.id, kind, spot);
+  if (err){ toast(err); return false; }
+  return true;
+}
+function actShip(t){
+  const me = game.players[game.humanId];
+  if (me.ducats < 400){ toast('A longship costs 400 coin.'); return false; }
+  if (!game.isLand(t)){ toast('Choose a shore to land on.'); return false; }
+  const from = nearestCoast(me, t % game.W, (t / game.W) | 0);
+  if (from < 0){ toast('You hold no coastline.'); return false; }
+  const troops = Math.floor(me.sold * ratioVal());
+  if (troops < 20){ toast('Too few men to fill a longship.'); return false; }
+  const err = game.sail('longship', me.id, from, t, troops);
+  if (err){ toast(err); return false; }
+  me.ducats -= 400; me.sold -= troops;
+  toast(`${fmt(troops)} men set sail.`, 'good');
+  return true;
+}
+function actGalley(t){
+  const me = game.players[game.humanId];
+  if (me.ducats < 1000){ toast('A war galley costs 1000 coin.'); return false; }
+  if (!game.isWater(t)){ toast('Send a galley to open water.'); return false; }
+  const from = nearestCoast(me, t % game.W, (t / game.W) | 0);
+  if (from < 0){ toast('You hold no coastline.'); return false; }
+  const err = game.sail('galley', me.id, from, t, 0);
+  if (err){ toast(err); return false; }
+  me.ducats -= 1000;
+  toast('A war galley puts to sea.', 'good');
+  return true;
+}
+function actAlly(id){
+  const me = game.players[game.humanId], p = game.players[id];
+  if (game.wouldAlly(p, me.id)){ game.ally(me.id, id); toast(`<b>${p.name}</b> swears to you.`, 'good'); }
+  else toast(`<b>${p.name}</b> spurns your offer.`);
+}
+function actBreak(id){
+  game.breakAlly(game.humanId, id, true);
+  toast(`You break faith with <b>${game.players[id].name}</b>.`, 'war');
+}
+function actLook(id){
+  const p = game.players[id];
+  if (!p.tiles) return;
+  cam.x = p.cx; cam.y = p.cy; cam.z = Math.max(cam.z, 3.5); clampCam();
+}
+
+function onClick(px, py){
+  const t = tileAt(px, py);
+  if (t < 0) return;
+  if (game.phase === 'place'){
+    if (game.terrain[t] < T_PLAIN) return toast('Plant your standard on dry land.');
+    if (game.terrain[t] === T_PEAK) return toast('Nothing grows on the peaks — choose kinder ground.');
+    beginWar(t);
+    return;
+  }
+  if (game.phase !== 'war') return;
+  if (mode === 'build'){ if (actBuild(t, modeArg)) setMode('attack'); return; }
+  if (mode === 'siege'){ if (actSiege(t, modeArg)) setMode('attack'); return; }
+  if (mode === 'ship'){  if (actShip(t))            setMode('attack'); return; }
+  if (mode === 'galley'){ if (actGalley(t))         setMode('attack'); return; }
+  actAttack(t);
+}
+
+// ------------------------------------------------------------ right-click orders
+function closeCtx(){ $('ctx').classList.remove('on'); }
+
+function openCtx(px, py){
+  if (!game || game.phase !== 'war' || game.humanId < 0) return;
+  const t = tileAt(px, py);
+  if (t < 0) return closeCtx();
+  const el = $('ctx'), me = game.players[game.humanId], o = game.owner[t];
+  const mi = (act, icon, label, cost, ok) =>
+    `<button class="mi ${ok ? '' : 'off'}" data-a="${act}">${icon ? svg(icon) : noIcon}
+      <span>${label}</span>${cost != null ? `<span class="cs">${cost}c</span>` : ''}</button>`;
+  const shore = me.coast.size > 0 && game.adjWater(t) >= 0;
+  const rows = [];
+  let title, sub;
+
+  if (game.isWater(t)){
+    title = 'Open water'; sub = 'the sea between realms';
+    rows.push(mi('galley', 'galley', 'Send a war galley', 1000, me.ducats >= 1000 && me.coast.size > 0));
+  } else if (o === me.id){
+    title = 'Your ground'; sub = 'raise a work here';
+    for (const type of B_ALL){
+      const cost = me.costOf(type);
+      const ok = me.ducats >= cost && !game.build[t] &&
+                 (!BUILDS[type].needCoast || me.coast.has(t));
+      rows.push(mi('build:' + type, BUILDS[type].key, 'Raise a ' + BUILDS[type].name, cost, ok));
+    }
+  } else if (o < 0){
+    title = 'Open ground'; sub = 'unclaimed by any banner';
+    rows.push(mi('attack', null, `Claim it — ${fmt(me.sold * ratioVal())} soldiers`, null, me.sold > 10));
+    if (shore) rows.push(mi('ship', 'ship', 'Land a longship here', 400, me.ducats >= 400));
+  } else {
+    const p = game.players[o], sworn = me.allies.has(o);
+    title = p.name;
+    sub = `${sworn ? 'sworn ' + Math.ceil(game.pactLeft(me.id, o)) + 's more'
+             : game.atWar(me.id, o) ? 'at war with you' : 'neutral'}
+           · ${fmt(p.tiles)} holdings · ${fmt(p.sold)} soldiers`;
+    rows.push(mi('attack', null, `March on them — ${fmt(me.sold * ratioVal())} soldiers`, null, !sworn && me.sold > 10));
+    if (shore) rows.push(mi('ship', 'ship', 'Land a longship here', 400, me.ducats >= 400));
+    rows.push('<div class="msep"></div>');
+    rows.push(sworn ? mi('break', null, 'Break the pact', null, true)
+                    : mi('ally',  null, 'Offer an alliance', null, true));
+    rows.push(mi('look', null, 'Look upon their lands', null, true));
+    if (me.st[B_SIEGE].size){
+      rows.push('<div class="msep"></div>');
+      for (const k of ['ram', 'treb', 'camp'])
+        rows.push(mi('siege:' + k, k, 'Lay a ' + SIEGE[k].name.toLowerCase(), SIEGE[k].cost, me.ducats >= SIEGE[k].cost));
+    }
+  }
+
+  el.innerHTML = `<div class="hd"><div class="n">${title}</div><div class="s">${sub}</div></div>` + rows.join('');
+  el.classList.add('on');
+  el.style.left = Math.max(6, Math.min(innerWidth  - el.offsetWidth  - 8, px + 4)) + 'px';
+  el.style.top  = Math.max(6, Math.min(innerHeight - el.offsetHeight - 8, py + 4)) + 'px';
+  el.onclick = e => {
+    const b = e.target.closest('.mi');
+    if (!b || b.classList.contains('off')) return;
+    const a = b.dataset.a;
+    if (a === 'attack')            actAttack(t);
+    else if (a === 'ship')         actShip(t);
+    else if (a === 'galley')       actGalley(t);
+    else if (a === 'ally')         actAlly(o);
+    else if (a === 'break')        actBreak(o);
+    else if (a === 'look')         actLook(o);
+    else if (a.startsWith('build:')) actBuild(t, +a.slice(6));
+    else if (a.startsWith('siege:')) actSiege(t, a.slice(6));
+    closeCtx();
+  };
+}
+
+addEventListener('keydown', e => {
+  if (!game || game.phase !== 'war') return;
+  if (e.key === 'Escape'){ setMode('attack'); closeCtx(); showTray(null); }
+  if (e.key >= '1' && e.key <= '7') setMode('build', +e.key);
+  if (e.key === ' '){ e.preventDefault(); cycleSpeed(); }
+  const r = $('ratio');
+  if (e.key === 'ArrowUp'){ r.value = Math.min(100, +r.value + 5); ratioLab(); }
+  if (e.key === 'ArrowDown'){ r.value = Math.max(1, +r.value - 5); ratioLab(); }
+});
+
+// ---------------------------------------------------------------------- HUD
+let msgCount = 0;
+function toast(html, kind){
+  const d = document.createElement('div');
+  d.className = 'msg ' + (kind || '');
+  d.innerHTML = html;
+  $('log').prepend(d);
+  while ($('log').children.length > 7) $('log').lastChild.remove();
+  msgCount++;
+}
+function ratioLab(){
+  const me = game && game.humanId >= 0 ? game.players[game.humanId] : null;
+  const v = +$('ratio').value;
+  $('ratiolab').innerHTML = `<b>${v}%</b> — ${me ? fmt(me.sold * v / 100) : 0} soldiers`;
+}
+$('ratio').addEventListener('input', ratioLab);
+// the left panel doubles as "where am I?"
+$('left').style.cursor = 'pointer';
+$('left').title = 'centre the view on your lands';
+$('left').onclick = () => {
+  if (!game || game.humanId < 0) return;
+  const me = game.players[game.humanId];
+  if (!me.tiles) return;
+  cam.x = me.cx; cam.y = me.cy; cam.z = Math.max(cam.z, 4); clampCam();
+};
+
+function cycleSpeed(){
+  speed = speed === 0 ? 1 : speed === 1 ? 2 : speed === 2 ? 4 : 0;
+  $('speed').textContent = speed === 0 ? '❚❚ paused' : '▶ ' + speed + '×';
+}
+$('speed').onclick = cycleSpeed;
+
+let lastEvent = 0, boardT = 0;
+function updateHUD(){
+  if (!game || game.humanId < 0) return;
+  const me = game.players[game.humanId];
+  const pop = Math.max(1, me.pop);
+  $('spop').textContent = fmt(me.pop);
+  $('bciv').style.width  = (me.civ  / pop * 100) + '%';
+  $('blevy').style.width = (me.levy / pop * 100) + '%';
+  $('bsold').style.width = (me.sold / pop * 100) + '%';
+  $('smix').innerHTML = `${fmt(me.civ)} folk · <span style="color:#d0a63f">${fmt(me.levy)} levies</span>`
+                      + ` · <span style="color:#c2604c">${fmt(me.sold)} soldiers</span>`;
+  $('ssold').innerHTML = fmt(me.sold)
+    + (me.committed > 0 ? ` <span style="color:#a89566">+${fmt(me.committed)} afield</span>` : '');
+  // arms are only meaningful next to the host they have to equip
+  const eq = me.equip;
+  $('sarms').innerHTML = fmt(me.arms) + ` <span class="${eq < 0.6 ? 'warn' : ''}"`
+    + ` style="font-size:11px">${(eq * 100).toFixed(0)}% armed</span>`
+    + (me.armsRate ? ` <span style="color:#7f6c46;font-size:11px">+${me.armsRate.toFixed(0)}/s</span>` : '');
+  const net = (me.income || 0) - (me.upkeep || 0);
+  $('sgold').innerHTML = fmt(me.ducats)
+    + ` <span style="font-size:11px" class="${net < 0 ? 'warn' : ''}">${net >= 0 ? '+' : ''}${net.toFixed(1)}/s</span>`;
+  $('sfood').innerHTML = me.starving
+    ? `<span class="warn">starving ${(me.food || 0).toFixed(1)}/s</span>`
+    : `+${(me.food || 0).toFixed(1)}/s`;
+  $('stiles').textContent = fmt(me.tiles) + ` · ${(me.tiles / game.landCount * 100).toFixed(1)}%`;
+  const parts = [];
+  for (const b of B_ALL) if (me.st[b].size) parts.push(me.st[b].size + '× ' + BUILDS[b].name);
+  $('sbld').textContent = parts.length ? parts.join(', ') : '—';
+  if (openCat === 'realm') realmReadouts();
+  ratioLab(); refreshTools();
+
+  const t = Math.floor(game.time);
+  $('clock').textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+  $('tlords').textContent = game.aliveCount || 0;
+  const lead = game.leader >= 0 ? game.players[game.leader] : null;
+  $('tpct').textContent = lead ? (lead.tiles / game.landCount * 100).toFixed(1) + '%' : '—';
+
+  // new events
+  for (; lastEvent < game.events.length; lastEvent++){
+    const e = game.events[lastEvent];
+    toast(e.text, e.kind);
+  }
+  renderAsks();
+  if (performance.now() - boardT > 420){ boardT = performance.now(); renderBoard(); }
+}
+
+function renderBoard(){
+  const me = game.players[game.humanId];
+  const list = game.players.slice().sort((a, b) => b.tiles - a.tiles);
+  const top = list.slice(0, 16);
+  if (!top.includes(me)) top.push(me);
+  $('ralive').textContent = (game.aliveCount || 0) + ' standing';
+  $('board').innerHTML = top.map(p => {
+    const pct = (p.tiles / game.landCount * 100).toFixed(1);
+    let tag = '';
+    if (p.id !== me.id){
+      if (me.allies.has(p.id)) tag = `<span class="tag">sworn ${Math.ceil(game.pactLeft(me.id, p.id))}s</span>`;
+      else if (game.atWar(me.id, p.id)) tag = '<span class="tag war">at war</span>';
+    }
+    return `<div class="row ${p.id === me.id ? 'me' : ''} ${p.alive ? '' : 'dead'}" data-p="${p.id}">
+      <i class="sw" style="background:${p.color}"></i>
+      <span class="nm">${p.name}</span>${tag}
+      <span class="pc">${p.alive ? pct + '%' : '†'}</span></div>`;
+  }).join('');
+  $('board').onclick = e => {
+    const r = e.target.closest('.row'); if (!r) return;
+    showPop(+r.dataset.p, r.getBoundingClientRect());
+  };
+}
+
+function showPop(id, rect){
+  const p = game.players[id], me = game.players[game.humanId], el = $('pop');
+  if (id === me.id){ el.style.display = 'none'; return; }
+  const sworn = me.allies.has(id);
+  el.innerHTML = `
+    <h4 style="border-left:3px solid ${p.color};padding-left:7px">${p.name}</h4>
+    <div class="sub">${p.alive ? (sworn ? 'sworn to you · lapses in ' + Math.ceil(game.pactLeft(me.id, id)) + 's'
+        : game.atWar(me.id, id) ? 'at war with you' : 'neutral') : 'fallen'}</div>
+    <div class="st"><span>Holdings</span><span>${fmt(p.tiles)}</span></div>
+    <div class="st"><span>People</span><span>${fmt(p.pop)}</span></div>
+    <div class="st"><span>Soldiers</span><span>${fmt(p.sold)}</span></div>
+    <div class="st"><span>Men per holding</span><span>${p.density.toFixed(1)}</span></div>
+    <div class="st"><span>Sworn friends</span><span>${p.allies.size}</span></div>
+    ${p.traitor > 0 ? '<div class="st" style="color:#c9614f"><span>Oathbreaker</span><span>◆</span></div>' : ''}
+    <button data-a="look">Look upon their lands</button>
+    ${p.alive ? (sworn
+      ? '<button data-a="break">Break the pact</button>'
+      : '<button data-a="ally">Offer an alliance</button>') : ''}`;
+  el.style.display = 'block';
+  el.style.left = Math.max(8, rect.left - 226) + 'px';
+  el.style.top = Math.min(innerHeight - 220, rect.top) + 'px';
+  el.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const a = b.dataset.a;
+    if (a === 'look'){ cam.x = p.cx; cam.y = p.cy; cam.z = Math.max(cam.z, 3); clampCam(); }
+    if (a === 'break'){ game.breakAlly(me.id, id, true); toast(`You break faith with <b>${p.name}</b>.`, 'war'); }
+    if (a === 'ally'){
+      if (game.wouldAlly(p, me.id)){ game.ally(me.id, id); toast(`<b>${p.name}</b> swears to you.`, 'good'); }
+      else toast(`<b>${p.name}</b> spurns your offer.`);
+    }
+    el.style.display = 'none';
+  };
+}
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('#pop') && !e.target.closest('#board')) $('pop').style.display = 'none';
+  if (!e.target.closest('#ctx')) closeCtx();
+  if (openCat && !e.target.closest('#tray') && !e.target.closest('#cats')) showTray(null);
+});
+
+function renderAsks(){
+  const me = game.players[game.humanId];
+  game.asks = game.asks.filter(a => game.time - a.at < 30 && game.players[a.from].alive && !me.allies.has(a.from));
+  const box = $('asks');
+  const want = game.asks.map(a => a.from).join(',');
+  if (box.dataset.k === want) return;
+  box.dataset.k = want;
+  box.innerHTML = game.asks.map(a =>
+    `<div class="ask" data-f="${a.from}"><b style="color:${game.players[a.from].color}">${game.players[a.from].name}</b>
+     offers an alliance.<div class="btns"><button data-y="1">Swear it</button><button data-y="0">Refuse</button></div></div>`
+  ).join('');
+  box.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const from = +b.closest('.ask').dataset.f;
+    if (b.dataset.y === '1'){ game.ally(me.id, from); toast(`You and <b>${game.players[from].name}</b> are sworn.`, 'good'); }
+    game.asks = game.asks.filter(a => a.from !== from);
+    box.dataset.k = '';
+    renderAsks();
+  };
+}
+
+function banner(t, s, ms){
+  const b = $('banner');
+  b.querySelector('.t').textContent = t; b.querySelector('.s').textContent = s || '';
+  b.style.opacity = 1;
+  clearTimeout(banner._h);
+  banner._h = setTimeout(() => { b.style.opacity = 0; }, ms || 2600);
+}
+
+// ------------------------------------------------------------ lobby & guide
+// VERSION gates the guide: a player who ticked "don't show this again" sees it
+// once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
+// the matching CHANGELOG entry — that is the whole mechanism.
+const VERSION = '0.7.1';
+
+const CHANGELOG = [
+  { v:'0.7.1', when:'lobby', notes:[
+    'The lobby now lists the <b>actual lords you will face</b>. It previously showed invented names and then generated a different set of rivals for the match.',
+    'A build number is stamped on the title screen, and the page asks browsers not to cache it — a stale copy used to look like nothing had changed.',
+    '<b>This is still single-player.</b> The countdown and roster are the shape of the multiplayer lobby, but every rival is AI and nothing is networked yet.',
+  ]},
+  { v:'0.7.0', when:'economy', notes:[
+    'Population is no longer one number. It splits into <b>civilians</b>, <b>levies</b> in training, and <b>soldiers</b> — and every soldier is a worker taken out of the economy.',
+    '<b>Ducats</b> and <b>Arms</b> added as separate resources. Forges are the only source of arms, and an unarmed host fights at a third strength.',
+    '<b>Farms</b> and <b>Blacksmiths</b> are buildable. Works employ your people; a priority with no building behind it employs nobody.',
+    'New <b>Realm</b> panel: four worker priorities plus standing army and mobilisation.',
+    'Armies are raised from soldiers now, not from raw population.',
+  ]},
+  { v:'0.6.0', when:'diplomacy', notes:[
+    'Alliances were being refused three times in four. Acceptance now turns on fear — being weaker, being under attack, or watching a front-runner run away with the realm.',
+    'Allies inherit a grievance against whoever attacks you, and march if they share a border.',
+    'Allies who cannot march instead <b>send ducats</b>. Your own treasury is never spent without asking.',
+    'Pacts show their remaining term on the leaderboard and in the orders menu.',
+  ]},
+  { v:'0.5.0', when:'siege', notes:[
+    'Siege engines no longer fly across the map. A <b>Battering Ram</b>, <b>Trebuchet</b> or <b>Siege Camp</b> is laid on your own frontier and invests the ground in front of it.',
+    'A siege breaks walls and bleeds the garrison, and dies if the defender retakes the ground it stands on.',
+  ]},
+  { v:'0.4.0', when:'warfare', notes:[
+    'Attacks advance as a <b>front</b>. They used to thread through open plains and strand the woods and hills behind them — and route around castles entirely, which is why defences did nothing.',
+    'Terrain and castles now genuinely slow an advance, because the front has to grind through them.',
+  ]},
+  { v:'0.3.0', when:'controls', notes:[
+    '<b>Right-click</b> the map for orders — march, swear, build, besiege.',
+    'Build menu grouped into Realm, Works, Ships and Siege.',
+  ]},
+  { v:'0.2.0', when:'look', notes:[
+    'Heraldic banners and a parchment map.',
+  ]},
+  { v:'0.1.0', when:'first playable', notes:[
+    'Territory conquest against AI lords, alliances, ships and structures.',
+  ]},
+];
+
+const HELP = `
+<h4>What you are trying to do</h4>
+<p>Take <b>${Math.round(CFG.WIN_PCT * 100)}%</b> of the realm, or be the last banner flying. You start
+with one small holding and a few hundred people. Everything else you have to build.</p>
+<p><b>Military strength is earned, never granted.</b> People work the land; farms feed them; forges arm
+them; trade pays for it all. An army is what a healthy economy can afford — not something that appears
+because you own ground.</p>
+
+<h4>Moving around</h4>
+<p><span class="keys">drag</span> pan · <span class="keys">scroll</span> zoom ·
+<span class="keys">click</span> a land to march on it · <span class="keys">right-click</span> anywhere
+for orders · <span class="keys">Space</span> pause and change speed ·
+<span class="keys">1</span>–<span class="keys">7</span> pick a work to place ·
+<span class="keys">Esc</span> cancel. Click your own panel, top left, to find your lands again.</p>
+
+<h4>Your people</h4>
+<p>The bar under <b>People</b> splits three ways, and the whole game lives in that split:</p>
+<div class="row2"><div class="lhs" style="color:#8fae62">Civilians</div><div class="rhs">work the farms, forges and markets. They are your entire economy.</div></div>
+<div class="row2"><div class="lhs" style="color:#d0a63f">Levies</div><div class="rhs">civilians called up and still training. They take about ${ECON.TRAIN_TIME} seconds to become soldiers, and produce nothing meanwhile.</div></div>
+<div class="row2"><div class="lhs" style="color:#c2604c">Soldiers</div><div class="rhs">the only people who can take or hold ground. They cost ducats every second and will never work a field again until you disband them.</div></div>
+
+<h4>The Realm sliders — where your people work</h4>
+<p>These are <b>priorities, not percentages</b>. Your civilians are spread across the four sectors in
+proportion to the sliders, then capped by how many jobs your buildings actually offer.</p>
+<div class="row2"><div class="lhs">Farms</div><div class="rhs">food, and so population growth. Run short and your people starve and your numbers fall.</div></div>
+<div class="row2"><div class="lhs">Forges</div><div class="rhs">the <b>only</b> source of arms. Arms equip soldiers; a wholly unequipped host fights at <b>${Math.round(ECON.UNARMED * 100)}%</b> and pays for every field in blood.</div></div>
+<div class="row2"><div class="lhs">Trade</div><div class="rhs">ducats — but only through towns and harbours. Trade priority with no town does nothing at all.</div></div>
+<div class="row2"><div class="lhs">Works</div><div class="rhs">construction labour, which discounts what you build.</div></div>
+<p>The figure beside each slider — <b>"1,085 of 12.0k"</b> — is <b>workers employed of jobs available</b>.
+That is the number to watch. If it reads <b>no works</b>, you have set a priority for a sector you have
+built nothing for, and those people are idle. If the left number is far below the right, you do not have
+the population to staff what you have built.</p>
+
+<h4>The army sliders</h4>
+<div class="row2"><div class="lhs">Standing</div><div class="rhs">a professional army held permanently. Always trained, always ready — and always paid for, out of the workforce forever. This is your insurance.</div></div>
+<div class="row2"><div class="lhs">Mobilise</div><div class="rhs">an emergency call-up on top of it. Cheap to want, slow to arrive: levies must train, and they need arms waiting for them. Mobilising more men than you have arms for gives you a rabble.</div></div>
+<p>Drop mobilisation back to zero and soldiers drift home to the fields. <b>Peace is worth money</b> —
+farms regain hands, forges restart, tax rises. Demobilising is a real move, not a surrender.</p>
+
+<h4>Making war</h4>
+<p><b>Soldiers sent</b> at the bottom is the share of your soldiers you commit to an attack. Click any
+land held by a rival — or open ground — and that share marches.</p>
+<p>An attack advances as a <b>front</b>, converting fields one at a time from your border inward. Woods,
+hills and mountains are slower and dearer than open plain, and ground covered by a castle is dearer
+still. Men committed to an attack are not defending your own borders, so a big swing leaves you open.</p>
+<p>Attacking open ground gets more expensive the more you already hold — a realm can only reach so far.</p>
+
+<h4>What to build</h4>
+<div class="row2"><div class="lhs">Farm</div><div class="rhs">food. Without it your population stops growing and then falls.</div></div>
+<div class="row2"><div class="lhs">Blacksmith</div><div class="rhs">arms. Nothing else makes them.</div></div>
+<div class="row2"><div class="lhs">Town</div><div class="rhs">trade jobs, tax and construction labour — the hub of an economy.</div></div>
+<div class="row2"><div class="lhs">Castle</div><div class="rhs">fortifies the ground around it, making it far costlier for anyone to take.</div></div>
+<div class="row2"><div class="lhs">Harbour</div><div class="rhs">sea trade, and the place your ships put out from. Must sit on the shore.</div></div>
+<div class="row2"><div class="lhs">Siege Works</div><div class="rhs">lets you lay sieges at all.</div></div>
+<div class="row2"><div class="lhs">Watchtower</div><div class="rhs">the garrison harries besiegers, wearing enemy siege camps out twice as fast.</div></div>
+
+<h4>Ships and siege</h4>
+<p>A <b>Longship</b> carries soldiers to a distant shore — the only way to reach a land you do not border.
+A <b>War Galley</b> holds open water and sinks what tries to cross it.</p>
+<p>A siege is <b>laid on your own frontier</b>, not fired at a map square. It invests the ground in front
+of it: walls come down, the garrison bleeds, and the fields are breached so your assault costs less. It
+lasts a set time and <b>dies if the defender retakes the ground it stands on</b>.</p>
+
+<h4>Diplomacy</h4>
+<p>Right-click a rival to offer an alliance. Lords say yes out of fear far more than friendship — the
+weak, the besieged, and anyone frightened of the leader will sign readily; a comfortable equal will not.</p>
+<p><b>Pacts expire</b> after a few minutes, and the time left is shown on the leaderboard. While one
+stands you cannot attack each other, allies take up a grievance against anyone who attacks you, and
+those too far away to march will send you ducats instead. Breaking a pact early marks you an oathbreaker
+and everyone treats you accordingly.</p>
+
+<h4>Four ways to play</h4>
+<ul>
+<li><b>Agricultural</b> — heavy farms, fast growth, recovers from losses quickly. Vulnerable until it mobilises.</li>
+<li><b>Industrial</b> — many forges, deep arms stocks, strong in a long war. Needs a big workforce.</li>
+<li><b>Military</b> — large standing army, immediate readiness, expensive, weaker civilian economy.</li>
+<li><b>Mercantile</b> — trade network and deep coffers, small army, finances its friends.</li>
+</ul>
+<p>The AI lords each follow one of these. You start balanced and choose your own with the sliders.</p>
+`;
+
+function changelogHTML(){
+  return CHANGELOG.map(c => `
+    <h4 style="margin-top:14px"><span class="ver">${c.v}</span><span class="when">${c.when}</span></h4>
+    <ul>${c.notes.map(n => `<li>${n}</li>`).join('')}</ul>`).join('');
+}
+
+const HELP_KEY = 'bannerfront.guideSeen';
+let lobbyTimer = null, lobbyLeft = 60;
+
+function showTab(which){
+  for (const b of $('tabs').querySelectorAll('.tab')) b.classList.toggle('on', b.dataset.t === which);
+  $('tabbody').innerHTML = which === 'log' ? changelogHTML() : HELP;
+  $('tabbody').scrollTop = 0;
+}
+
+function openLobby(){
+  $('start').style.display = 'none';
+  $('lobby').style.display = 'flex';
+  $('verlab').textContent = 'v' + VERSION;
+
+  // The guide reappears whenever VERSION changes, even if it was dismissed.
+  const seen = (() => { try { return localStorage.getItem(HELP_KEY); } catch(e){ return null; } })();
+  const hide = seen === VERSION;
+  $('guide').style.display = hide ? 'none' : 'block';
+  $('guideshut').style.display = hide ? 'flex' : 'none';
+  $('cbHelp').checked = hide;
+  if (!hide) showTab('play');
+
+  // Build the match now, so the roster below is the real one.
+  const g = createMatch();
+  const me = g.players[g.humanId];
+  const seats = g.players.filter(p => p.id !== g.humanId);
+  $('roster').innerHTML = '';
+  const addSeat = (name, colour, you) => {
+    const d = document.createElement('div');
+    d.className = 'seat' + (you ? ' you' : '');
+    d.innerHTML = `<i style="background:${colour}"></i>${name}${you ? '' : '<b>AI</b>'}`;
+    $('roster').appendChild(d);
+  };
+  addSeat(me.name, me.color, true);
+
+  lobbyLeft = 60;
+  let joined = 0;
+  clearInterval(lobbyTimer);
+  const tickLobby = () => {
+    lobbyLeft--;
+    const m = Math.floor(Math.max(0, lobbyLeft) / 60), s = Math.max(0, lobbyLeft) % 60;
+    $('lobbyclock').textContent = m + ':' + String(s).padStart(2, '0');
+    // let the roster fill across the first two thirds of the wait
+    const want = Math.min(seats.length, Math.round((60 - lobbyLeft) / 40 * seats.length));
+    while (joined < want){ addSeat(seats[joined].name, seats[joined].color, false); joined++; }
+    $('lobbysub').textContent = joined >= seats.length
+      ? `${joined + 1} banners answer the call — all but yours are AI`
+      : 'lords are riding in — the war begins when the horn sounds';
+    if (lobbyLeft <= 0) beginFromLobby();
+  };
+  $('lobbyclock').textContent = '1:00';
+  lobbyTimer = setInterval(tickLobby, 1000);
+}
+
+function beginFromLobby(){
+  clearInterval(lobbyTimer); lobbyTimer = null;
+  try {
+    if ($('cbHelp').checked) localStorage.setItem(HELP_KEY, VERSION);
+    else localStorage.removeItem(HELP_KEY);
+  } catch(e){ /* private mode — just show it again next time */ }
+  $('lobby').style.display = 'none';
+  startMatch();
+}
+
+// --------------------------------------------------------------- start / end
+let chosenColor = PALETTE[1];
+function setupStart(){
+  $('wintxt').textContent = Math.round(CFG.WIN_PCT * 100) + '%';
+  const picks = PALETTE.slice(0, 12);   // the twelve tinctures at full shade
+  $('swatches').innerHTML = picks.map((c, i) =>
+    `<i data-c="${c}" class="${i === 1 ? 'sel' : ''}" style="background:${c}"></i>`).join('');
+  chosenColor = picks[1];
+  $('swatches').onclick = e => {
+    if (!e.target.dataset.c) return;
+    chosenColor = e.target.dataset.c;
+    [...$('swatches').children].forEach(i => i.classList.toggle('sel', i === e.target));
+  };
+  // Which build am I actually running? Answering that at a glance saves
+  // chasing a stale cache.
+  $('buildlab').textContent = 'build ' + VERSION;
+  $('inName').value = makeHouseName(Math.random);
+  $('btnPlay').onclick = openLobby;
+  $('btnBegin').onclick = beginFromLobby;
+  $('btnGuide').onclick = () => {
+    $('guide').style.display = 'block';
+    $('guideshut').style.display = 'none';
+    $('cbHelp').checked = false;
+    showTab('play');
+  };
+  $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) showTab(b.dataset.t); };
+  $('btnAgain').onclick = () => {
+    $('over').style.display = 'none'; $('hud').style.display = 'none'; $('start').style.display = 'flex';
+  };
+}
+
+// The match is built when the lobby opens, so the roster shown while you wait
+// is the actual set of lords you will face — not decorative names.
+let pendingGame = null;
+function createMatch(){
+  const name = ($('inName').value || '').trim().slice(0, 18) || 'House Vareth';
+  pendingGame = makeMatch({
+    bots: +$('inBots').value,
+    preset: $('inMap').value,
+    human: { name, color: chosenColor },
+  });
+  return pendingGame;
+}
+
+function startMatch(){
+  game = pendingGame || createMatch();
+  pendingGame = null;
+  const name = game.players[game.humanId].name;
+  mapCv = document.createElement('canvas');
+  mapCv.width = game.W; mapCv.height = game.H;
+  mapCtx = mapCv.getContext('2d');
+  mapImg = mapCtx.createImageData(game.W, game.H);
+  buildBase(); buildPalette(); repaintAll(); mapCtx.putImageData(mapImg, 0, 0);
+  game.dirty.length = 0; game.dirtyAll = false;
+
+  cam = { x: game.W / 2, y: game.H / 2, z: fitZoom() };
+  lastEvent = 0; msgCount = 0; speed = 1; running = true;
+  $('log').innerHTML = ''; $('asks').innerHTML = ''; $('asks').dataset.k = '';
+  $('start').style.display = 'none'; $('over').style.display = 'none';
+  $('hud').style.display = 'block';
+  $('myname').textContent = name; $('myswatch').style.background = chosenColor;
+  $('speed').textContent = '▶ 1×';
+  overShown = false;
+  buildTools(); setMode('attack');
+  banner('Choose your ground', 'click anywhere on land to plant your banner', 6000);
+}
+
+function beginWar(tile){
+  const me = game.players[game.humanId];
+  game.seat(me, tile);
+  const bots = game.players.filter(p => p.bot);
+  const minDist = Math.max(9, Math.sqrt(game.landCount / (bots.length + 2)) * 0.85);
+  for (const b of bots){
+    const t = game.pickSeat(minDist);
+    if (t >= 0) game.seat(b, t);
+  }
+  game.audit();
+  game.phase = 'war';
+  cam.x = tile % game.W; cam.y = (tile / game.W) | 0;
+  cam.z = Math.min(6, Math.max(3, fitZoom() * 2.4)); clampCam();
+  banner('The war begins', `${game.aliveCount} banners fly`, 2600);
+  toast(`<b>${me.name}</b> plants its standard. Take <b>${Math.round(CFG.WIN_PCT*100)}%</b> of the realm to win.`, 'big');
+  renderBoard();
+}
+
+let overShown = false;
+function showOver(){
+  overShown = true; running = false;
+  const me = game.players[game.humanId], w = game.winner >= 0 ? game.players[game.winner] : null;
+  const won = w === me, fell = !me.alive;
+  const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
+  const share = p => (p.tiles / game.landCount * 100).toFixed(1);
+  $('ovTitle').textContent = won ? 'THE REALM IS YOURS' : fell ? 'YOUR BANNER FALLS' : 'THE CROWN IS LOST';
+  $('ovTag').textContent = won ? 'a crown taken by force'
+    : (w ? w.name + ' takes the crown' : 'the realm lies empty');
+  $('ovText').innerHTML = won
+    ? `You held <b>${share(me)}%</b> of the realm after ${mins}m ${secs}s, with ${fmt(me.pop)} under arms
+       and ${me.st[B_TOWN].size + me.st[B_CASTLE].size + me.st[B_HARBOR].size} works standing.`
+    : fell
+    ? `${me.name} was broken after ${mins}m ${secs}s, holding ${fmt(me.peak)} at its height.
+       ${w ? `<b>${w.name}</b> now holds ${share(w)}% of the realm.` : ''}`
+    : `<b>${w.name}</b> claimed ${share(w)}% of the realm after ${mins}m ${secs}s. You were still standing
+       on ${fmt(me.tiles)} — ${share(me)}% — and rose no higher than ${fmt(me.peak)}.`;
+  $('over').style.display = 'flex';
+}
+
+// --------------------------------------------------------------------- loop
+let last = 0, acc = 0;
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
+  last = now;
+  if (game && game.phase === 'war' && running && speed > 0){
+    acc += dt * speed;
+    const step = 1 / CFG.TICK_HZ;
+    let n = 0;
+    while (acc >= step && n < 12){ game.tick(step); acc -= step; n++; }
+    if (acc > step * 4) acc = 0;
+  }
+  render(now);
+  if (game && game.phase === 'done' && !overShown) showOver();
+}
+setupStart();
+setInterval(() => { if (game && game.phase !== 'place') updateHUD(); }, 110);
+requestAnimationFrame(frame);
+
+</script>
+</body>
+</html>
