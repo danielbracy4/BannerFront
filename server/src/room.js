@@ -126,7 +126,10 @@ class Room {
       you: Object.fromEntries(this.seats.map(s => [s.socketId, s.lordId])),
     });
 
-    g.dirty.length = 0; g.dirtyAll = false;
+    // The first broadcast has to carry the whole world. Clearing the dirty list
+    // here instead left every client with an empty map: the server had already
+    // seated all 41 lords, and nobody was ever told.
+    g.dirty.length = 0; g.dirtyAll = true;
     const step = 1 / TICK_HZ;
     this.tickTimer = setInterval(() => this.tick(step), 1000 / TICK_HZ);
     this.castTimer = setInterval(() => this.broadcast(), 1000 / BROADCAST_HZ);
@@ -162,9 +165,30 @@ class Room {
       g.dirty.length = 0;
     }
 
+    // works that went up or came down since we last spoke
+    let builds = null;
+    if (full){
+      builds = [];
+      for (let i = 0; i < g.N; i++) if (g.build[i]) builds.push(i, g.build[i]);
+      g.buildDirty.length = 0;
+    } else if (g.buildDirty.length){
+      builds = [];
+      const seen = new Set();
+      for (const t of g.buildDirty){
+        if (seen.has(t)) continue;
+        seen.add(t);
+        builds.push(t, g.build[t]);
+      }
+      g.buildDirty.length = 0;
+    }
+
+    // rates too — without them the client's panel reads a flat 0.0/s and the
+    // player cannot see whether their realm is feeding itself or starving
     const lords = g.players.map(p => [
       p.id, p.tiles, Math.round(p.civ), Math.round(p.levy), Math.round(p.sold),
       Math.round(p.arms), Math.round(p.ducats), p.alive ? 1 : 0, Math.round(p.committed),
+      +(p.food || 0).toFixed(2), +(p.income || 0).toFixed(2), +(p.upkeep || 0).toFixed(2),
+      +(p.armsRate || 0).toFixed(2),
     ]);
 
     const events = g.events.slice(this.lastEventSent);
@@ -172,7 +196,7 @@ class Room {
 
     this.io.to(this.id).emit('state', {
       t: +g.time.toFixed(1),
-      full, owners, lords,
+      full, owners, builds, lords,
       alive: g.aliveCount, leader: g.leader,
       boats: g.boats.map(b => [b.owner, +b.x.toFixed(1), +b.y.toFixed(1), b.kind]),
       sieges: g.sieges.map(s => [s.owner, s.tile, s.kind, +(s.t / s.dur).toFixed(2)]),
@@ -195,6 +219,8 @@ class Room {
   // --------------------------------------------------------------- intents
   // Everything a client can ask for. Each one is checked against the sender's
   // own lord — there is no path here to touch anybody else's realm.
+  nope(socketId, why){ if (why) this.io.to(socketId).emit('nope', { why }); }
+
   intent(socketId, msg){
     const g = this.game;
     if (!g || g.phase !== 'war' || !msg || typeof msg.do !== 'string') return;
@@ -211,18 +237,22 @@ class Room {
         if (tile < 0 || !g.isLand(tile)) return;
         const target = g.owner[tile];
         if (target === me.id) return;
-        g.launch(me.id, target, me.sold * ratio);
+        if (me.sold < 10) return this.nope(socketId, 'You have no soldiers to send.');
+        if (!g.launch(me.id, target, me.sold * ratio))
+          this.nope(socketId, target >= 0
+            ? `No border with ${g.players[target].name} — sail a longship instead.`
+            : 'No open ground touches your lands.');
         return;
       }
       case 'build': {
         const type = +msg.type;
         if (tile < 0 || !B_ALL.includes(type)) return;
-        g.place(me.id, tile, type);
+        this.nope(socketId, g.place(me.id, tile, type));
         return;
       }
       case 'siege': {
         if (tile < 0 || !SIEGE[msg.kind]) return;
-        g.raise(me.id, msg.kind, tile);
+        this.nope(socketId, g.raise(me.id, msg.kind, tile));
         return;
       }
       case 'ship':
@@ -230,7 +260,7 @@ class Room {
         if (tile < 0) return;
         const isGalley = msg.do === 'galley';
         const cost = isGalley ? 1000 : 400;
-        if (me.ducats < cost) return;
+        if (me.ducats < cost) return this.nope(socketId, 'Not enough coin.');
         if (isGalley ? !g.isWater(tile) : !g.isLand(tile)) return;
         let from = -1, best = Infinity;
         const tx = tile % g.W, ty = (tile / g.W) | 0;
@@ -238,10 +268,11 @@ class Room {
           const d = (c % g.W - tx) ** 2 + (((c / g.W) | 0) - ty) ** 2;
           if (d < best){ best = d; from = c; }
         }
-        if (from < 0) return;
+        if (from < 0) return this.nope(socketId, 'You hold no coastline.');
         const troops = isGalley ? 0 : Math.floor(me.sold * ratio);
-        if (!isGalley && troops < 20) return;
-        if (g.sail(isGalley ? 'galley' : 'longship', me.id, from, tile, troops) !== null) return;
+        if (!isGalley && troops < 20) return this.nope(socketId, 'Too few men to fill a longship.');
+        const sailErr = g.sail(isGalley ? 'galley' : 'longship', me.id, from, tile, troops);
+        if (sailErr !== null) return this.nope(socketId, sailErr);
         me.ducats -= cost; me.sold -= troops;
         return;
       }
@@ -249,7 +280,8 @@ class Room {
         const id = +msg.id;
         const them = g.players[id];
         if (!them || !them.alive || id === me.id) return;
-        if (them.bot ? g.wouldAlly(them, me.id) : false) g.ally(me.id, id);
+        if (them.bot && g.wouldAlly(them, me.id)){ g.ally(me.id, id); this.nope(socketId, `${them.name} swears to you.`); }
+        else this.nope(socketId, `${them.name} spurns your offer.`);
         return;
       }
       case 'break': {

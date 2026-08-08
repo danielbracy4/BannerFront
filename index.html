@@ -332,7 +332,10 @@
       </div>
       <div class="fld" style="flex:1 1 100%"><label>Colours</label><div id="swatches"></div></div>
     </div>
-    <button class="cta" id="btnPlay">Muster</button>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="cta" id="btnPlay">Muster online</button>
+      <button class="cta" id="btnSolo" style="border-color:#5c4c2d;color:#c3b590">Play alone</button>
+    </div>
     <div class="hint">drag to pan · scroll to zoom · left-click to march · right-click for orders</div>
     <div class="build" id="buildlab">—</div>
   </div>
@@ -587,7 +590,8 @@ function render(now){
     c.fillStyle = p === me ? '#ffd465' : '#f2ead4';
     c.fillText(p.name, px, py - fs * 0.55);
     c.font = `${fs * 0.86}px "Iowan Old Style", Palatino, Georgia, serif`;
-    const lab = fmt(p.pop) + (p.committed > 0 ? ' ⚔' + fmt(p.committed) : '');
+    const afield = committedOf(p);
+    const lab = fmt(p.pop) + (afield > 0 ? ' ⚔' + fmt(afield) : '');
     c.strokeText(lab, px, py + fs * 0.62);
     c.fillStyle = p.allies.has(game.humanId) ? '#a9e08c' : '#dccfae';
     c.fillText(lab, px, py + fs * 0.62);
@@ -791,6 +795,7 @@ function renderRealmTray(){
       if (el.dataset.w) m.w[el.dataset.w] = +el.value / 100;
       else m[el.dataset.a] = +el.value / 100;
       realmReadouts();
+      NET.send({ do:'realm', w: m.w, standing: m.standing, mobil: m.mobil });
     });
   });
   realmReadouts();
@@ -850,6 +855,7 @@ function setMode(m, arg){
 
 // ------------------------------------------------------------------- clicks
 const ratioVal = () => +$('ratio').value / 100;
+const committedOf = p => NET.online ? (p.netCommitted || 0) : p.committed;
 
 function nearestCoast(me, tx, ty){
   let best = -1, bd = 1e18;
@@ -870,6 +876,11 @@ function actAttack(t){
   if (o >= 0 && me.allies.has(o)){
     toast(`You are sworn to ${game.players[o].name}. Break the pact first.`); return false;
   }
+  if (NET.online){
+    NET.send({ do:'march', tile:t, ratio: ratioVal() });
+    if (o >= 0) toast(`You march on <b>${game.players[o].name}</b>.`, 'war');
+    return true;
+  }
   const troops = Math.floor(me.sold * ratioVal());
   if (troops < 10){ toast('You have no soldiers to send.'); return false; }
   if (!game.launch(me.id, o, troops)){
@@ -881,6 +892,7 @@ function actAttack(t){
   return true;
 }
 function actBuild(t, type){
+  if (NET.online){ NET.send({ do:'build', tile:t, type }); return true; }
   const err = game.place(game.humanId, t, type);
   if (err){ toast(err); return false; }
   toast(`${BUILDS[type].name} raised.`, 'good');
@@ -889,6 +901,7 @@ function actBuild(t, type){
 // You point at the ground you want invested; the camp goes up on your own
 // frontier nearest to it. If your men aren't close enough, there is no siege.
 function actSiege(t, kind){
+  if (NET.online){ NET.send({ do:'siege', tile:t, kind }); return true; }
   const me = game.players[game.humanId];
   let spot = t, best = 1e18;
   if (game.owner[t] !== me.id || !me.border.has(t)){
@@ -909,6 +922,7 @@ function actSiege(t, kind){
   return true;
 }
 function actShip(t){
+  if (NET.online){ NET.send({ do:'ship', tile:t, ratio: ratioVal() }); return true; }
   const me = game.players[game.humanId];
   if (me.ducats < 400){ toast('A longship costs 400 coin.'); return false; }
   if (!game.isLand(t)){ toast('Choose a shore to land on.'); return false; }
@@ -923,6 +937,7 @@ function actShip(t){
   return true;
 }
 function actGalley(t){
+  if (NET.online){ NET.send({ do:'galley', tile:t }); return true; }
   const me = game.players[game.humanId];
   if (me.ducats < 1000){ toast('A war galley costs 1000 coin.'); return false; }
   if (!game.isWater(t)){ toast('Send a galley to open water.'); return false; }
@@ -935,11 +950,13 @@ function actGalley(t){
   return true;
 }
 function actAlly(id){
+  if (NET.online){ NET.send({ do:'ally', id }); return; }
   const me = game.players[game.humanId], p = game.players[id];
   if (game.wouldAlly(p, me.id)){ game.ally(me.id, id); toast(`<b>${p.name}</b> swears to you.`, 'good'); }
   else toast(`<b>${p.name}</b> spurns your offer.`);
 }
 function actBreak(id){
+  if (NET.online){ NET.send({ do:'break', id }); return; }
   game.breakAlly(game.humanId, id, true);
   toast(`You break faith with <b>${game.players[id].name}</b>.`, 'war');
 }
@@ -1088,8 +1105,9 @@ function updateHUD(){
   $('bsold').style.width = (me.sold / pop * 100) + '%';
   $('smix').innerHTML = `${fmt(me.civ)} folk · <span style="color:#d0a63f">${fmt(me.levy)} levies</span>`
                       + ` · <span style="color:#c2604c">${fmt(me.sold)} soldiers</span>`;
+  const afield = committedOf(me);
   $('ssold').innerHTML = fmt(me.sold)
-    + (me.committed > 0 ? ` <span style="color:#a89566">+${fmt(me.committed)} afield</span>` : '');
+    + (afield > 0 ? ` <span style="color:#a89566">+${fmt(afield)} afield</span>` : '');
   // arms are only meaningful next to the host they have to equip
   const eq = me.equip;
   $('sarms').innerHTML = fmt(me.arms) + ` <span class="${eq < 0.6 ? 'warn' : ''}"`
@@ -1215,13 +1233,133 @@ function banner(t, s, ms){
   banner._h = setTimeout(() => { b.style.opacity = 0; }, ms || 2600);
 }
 
+// ----------------------------------------------------------------- network
+// Online, the server owns the game. This client never advances the simulation:
+// it rebuilds the same map from the server's seed, applies ownership and stat
+// deltas, and sends *intents* for anything the player tries to do.
+const NET = {
+  // Served from the same host in production; a page hosted elsewhere dials out.
+  url: (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || /railway\.app$/.test(location.hostname))
+       ? '' : 'https://bannerfront-production.up.railway.app',
+  sock: null, online: false, myLord: -1, lords: [], joined: false,
+
+  lib(cb){
+    if (window.io) return cb(true);
+    const s = document.createElement('script');
+    s.src = (this.url || '') + '/socket.io/socket.io.js';
+    s.onload = () => cb(!!window.io);
+    s.onerror = () => cb(false);
+    document.head.appendChild(s);
+  },
+
+  connect(name, colour, onFail){
+    this.lib(ok => {
+      if (!ok) return onFail('could not reach the game server');
+      let done = false;
+      const sock = this.url ? io(this.url, { transports:['websocket','polling'] })
+                            : io({ transports:['websocket','polling'] });
+      this.sock = sock;
+      const fail = why => { if (!done){ done = true; try { sock.close(); } catch(e){} onFail(why); } };
+      setTimeout(() => { if (!this.online && !done) fail('the game server did not answer'); }, 9000);
+
+      sock.on('connect_error', () => fail('could not reach the game server'));
+      sock.on('denied', m => fail((m && m.why) || 'refused by the server'));
+      sock.on('connect', () => {
+        done = true; this.online = true;
+        sock.emit('join', { name, colour });
+      });
+      // a refused order must say why, or the player just sees nothing happen
+      sock.on('nope',  m => toast((m && m.why) || 'That order was refused.'));
+      sock.on('lobby', m => onServerLobby(m));
+      sock.on('start', m => onServerStart(m));
+      sock.on('state', m => onServerState(m));
+      sock.on('over',  m => onServerOver(m));
+      sock.on('disconnect', () => {
+        if (game && game.phase === 'war') toast('Lost the connection to the server.', 'war');
+        this.online = false;
+      });
+    });
+  },
+
+  send(msg){ if (this.online && this.sock) this.sock.emit('intent', msg); },
+  ratio(){ return ratioVal(); },
+};
+
+// Rebuild the identical map and field of lords from the server's seed, then
+// stop — from here the server tells us what is true.
+function onServerStart(m){
+  NET.myLord = m.you && m.you[NET.sock.id] != null ? m.you[NET.sock.id] : -1;
+  NET.lords = m.lords || [];
+  pendingGame = makeMatch({ bots: m.lords.length, preset: m.preset, seed: m.seed });
+  for (const l of NET.lords){
+    const p = pendingGame.players[l.id];
+    if (!p) continue;
+    p.name = l.name; p.color = l.colour; p.bot = l.bot;
+  }
+  pendingGame.humanId = NET.myLord;
+  // the server has already seated everyone; wipe the local seeding
+  for (let t = 0; t < pendingGame.N; t++) if (pendingGame.owner[t] >= 0) pendingGame.setOwner(t, -1);
+  for (const p of pendingGame.players){ p.alive = true; p.civ = p.levy = p.sold = 0; }
+  clearInterval(lobbyTimer); lobbyTimer = null;
+  $('lobby').style.display = 'none';
+  startMatch();
+  game.phase = 'war';
+  banner('The war begins', `${NET.lords.length} banners fly`, 2600);
+}
+
+function onServerState(m){
+  if (!game || NET.myLord < 0) return;
+  if (m.owners){
+    if (m.full) for (let t = 0; t < game.N; t++){ if (game.owner[t] !== m.owners[t]) game.setOwner(t, m.owners[t]); }
+    else for (let i = 0; i < m.owners.length; i += 2) game.setOwner(m.owners[i], m.owners[i + 1]);
+  }
+  if (m.builds) for (let i = 0; i < m.builds.length; i += 2) applyBuild(m.builds[i], m.builds[i + 1]);
+  for (const row of m.lords || []){
+    const p = game.players[row[0]];
+    if (!p) continue;
+    p.civ = row[2]; p.levy = row[3]; p.sold = row[4];
+    p.arms = row[5]; p.ducats = row[6]; p.alive = !!row[7];
+    p.netCommitted = row[8];
+    p.food = row[9]; p.income = row[10]; p.upkeep = row[11]; p.armsRate = row[12];
+    p.starving = p.food < 0;
+  }
+  game.time = m.t; game.aliveCount = m.alive; game.leader = m.leader;
+  game.boats = (m.boats || []).map(b => ({ owner:b[0], x:b[1], y:b[2], kind:b[3], dead:false }));
+  game.sieges = (m.sieges || []).map(s => ({ owner:s[0], tile:s[1], kind:s[2], t:s[3], dur:1, dead:false }));
+  for (const e of m.events || []) toast(e.text, e.kind);
+}
+
+function applyBuild(tile, type){
+  const o = game.owner[tile], old = game.build[tile];
+  if (old && o >= 0) game.players[o].st[old].delete(tile);
+  if (old === B_CASTLE && type !== B_CASTLE) game.stampCastle(tile, -1);
+  game.build[tile] = type;
+  if (type && o >= 0) game.players[o].st[type].add(tile);
+  if (type === B_CASTLE && old !== B_CASTLE) game.stampCastle(tile, 1);
+  game.dirty.push(tile);
+}
+
+function onServerOver(m){
+  if (!game) return;
+  game.phase = 'done';
+  game.winner = m.winner;
+  if (!overShown) showOver();
+}
+
 // ------------------------------------------------------------ lobby & guide
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 
 const CHANGELOG = [
+  { v:'0.8.0', when:'multiplayer', notes:[
+    '<b>Online play.</b> Matches now run on a server that owns the world. You send orders; it decides what happens and tells every player the same truth.',
+    'The lobby is real: it opens when the first player arrives, counts down 60 seconds while others join, and fills the remaining seats with AI.',
+    'A refused order now tells you why instead of silently doing nothing.',
+    'If the server cannot be reached, the game drops back to a solo match against AI rather than stranding you.',
+    '<b>Play alone</b> on the title screen still gives you the offline game.',
+  ]},
   { v:'0.7.1', when:'lobby', notes:[
     'The lobby now lists the <b>actual lords you will face</b>. It previously showed invented names and then generated a different set of rivals for the match.',
     'A build number is stamped on the title screen, and the page asks browsers not to cache it — a stale copy used to look like nothing had changed.',
@@ -1356,7 +1494,12 @@ function showTab(which){
   $('tabbody').scrollTop = 0;
 }
 
-function openLobby(){
+let onlineLobby = false;
+
+// Solo: the countdown and roster are ours. Online: the server owns both, and
+// everything below just renders what it tells us.
+function openLobby(solo){
+  onlineLobby = !solo;
   $('start').style.display = 'none';
   $('lobby').style.display = 'flex';
   $('verlab').textContent = 'v' + VERSION;
@@ -1369,7 +1512,30 @@ function openLobby(){
   $('cbHelp').checked = hide;
   if (!hide) showTab('play');
 
-  // Build the match now, so the roster below is the real one.
+  $('roster').innerHTML = '';
+  const addSeat = (name, colour, you) => {
+    const d = document.createElement('div');
+    d.className = 'seat' + (you ? ' you' : '');
+    d.innerHTML = `<i style="background:${colour}"></i>${name}${you ? '' : '<b>AI</b>'}`;
+    $('roster').appendChild(d);
+  };
+  if (onlineLobby){
+    $('lobbyclock').textContent = '—';
+    $('lobbysub').textContent = 'reaching the game server…';
+    addSeat(($('inName').value || 'your house').trim(), chosenColor, true);
+    NET.connect(($('inName').value || '').trim().slice(0, 18) || 'House Vareth', chosenColor, why => {
+      // A server we cannot reach must not strand the player on a dead screen.
+      onlineLobby = false;
+      toast(`${why} — playing alone instead.`, 'war');
+      $('lobbysub').textContent = why + ' — this match is against AI alone';
+      openSoloLobby();
+    });
+    return;
+  }
+  openSoloLobby();
+}
+
+function openSoloLobby(){
   const g = createMatch();
   const me = g.players[g.humanId];
   const seats = g.players.filter(p => p.id !== g.humanId);
@@ -1401,12 +1567,36 @@ function openLobby(){
   lobbyTimer = setInterval(tickLobby, 1000);
 }
 
+// The server's lobby: its countdown, its roster.
+function onServerLobby(m){
+  if (!onlineLobby || getComputedStyle($('lobby')).display === 'none') return;
+  const secs = Math.max(0, m.seconds | 0);
+  $('lobbyclock').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  $('roster').innerHTML = '';
+  const seat = (name, colour, tag, you) => {
+    const d = document.createElement('div');
+    d.className = 'seat' + (you ? ' you' : '');
+    d.innerHTML = `<i style="background:${colour || '#888'}"></i>${name}${tag ? '<b>' + tag + '</b>' : ''}`;
+    $('roster').appendChild(d);
+  };
+  (m.humans || []).forEach((h, i) => seat(h.name, h.colour, 'PLAYER', i === 0));
+  if (m.aiFill > 0) seat(`${m.aiFill} lords will be filled by AI`, '#5c4c2d', '', false);
+  $('lobbysub').textContent = (m.humans || []).length > 1
+    ? `${m.humans.length} players waiting — the war begins when the horn sounds`
+    : 'waiting for other players — AI will fill the rest';
+}
+
 function beginFromLobby(){
   clearInterval(lobbyTimer); lobbyTimer = null;
   try {
     if ($('cbHelp').checked) localStorage.setItem(HELP_KEY, VERSION);
     else localStorage.removeItem(HELP_KEY);
   } catch(e){ /* private mode — just show it again next time */ }
+  if (onlineLobby && NET.online){
+    NET.sock.emit('beginNow');       // the server decides when the match starts
+    $('lobbysub').textContent = 'calling the muster…';
+    return;
+  }
   $('lobby').style.display = 'none';
   startMatch();
 }
@@ -1428,7 +1618,8 @@ function setupStart(){
   // chasing a stale cache.
   $('buildlab').textContent = 'build ' + VERSION;
   $('inName').value = makeHouseName(Math.random);
-  $('btnPlay').onclick = openLobby;
+  $('btnPlay').onclick = () => openLobby(false);
+  $('btnSolo').onclick = () => openLobby(true);
   $('btnBegin').onclick = beginFromLobby;
   $('btnGuide').onclick = () => {
     $('guide').style.display = 'block';
@@ -1523,7 +1714,7 @@ function frame(now){
   requestAnimationFrame(frame);
   const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
   last = now;
-  if (game && game.phase === 'war' && running && speed > 0){
+  if (game && !NET.online && game.phase === 'war' && running && speed > 0){
     acc += dt * speed;
     const step = 1 / CFG.TICK_HZ;
     let n = 0;

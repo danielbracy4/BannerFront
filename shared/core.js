@@ -429,6 +429,7 @@ class Game {
     this.players = []; this.humanId = -1;
     this.attacks = []; this.boats = []; this.sieges = [];
     this.events = []; this.dirty = []; this.dirtyAll = true; this.asks = [];
+    this.buildDirty = [];   // works raised or razed since the last broadcast
     this.winner = -1; this.leader = -1; this.leadShare = 0; this.aliveCount = 0;
     this.terrain = new Uint8Array(this.N);
     this.owner   = new Int16Array(this.N).fill(-1);
@@ -717,7 +718,7 @@ class Game {
     p.ducats -= cost; p.bought[type]++;
     this.build[tile] = type; p.st[type].add(tile);
     if (type === B_CASTLE) this.stampCastle(tile, 1);
-    this.dirty.push(tile);
+    this.dirty.push(tile); this.buildDirty.push(tile);
     return null;
   }
 
@@ -728,7 +729,7 @@ class Game {
     if (o >= 0) this.players[o].st[b].delete(tile);
     if (b === B_CASTLE) this.stampCastle(tile, -1);
     this.build[tile] = 0;
-    this.dirty.push(tile);
+    this.dirty.push(tile); this.buildDirty.push(tile);
   }
 
   // ------------------------------------------------------------------ ships
