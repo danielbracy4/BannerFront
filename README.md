@@ -1,21 +1,25 @@
 # Bannerfront
 
 A real-time realm-conquest game in the vein of **openfront.io** / territorial.io,
-reskinned *and* re-mechanised for the middle ages. One HTML file, no build step,
-no dependencies — double-click `index.html`.
+reskinned *and* re-mechanised for the middle ages — where military strength is
+earned through economy and logistics rather than granted by territory.
 
-```
-open index.html
+```bash
+npm install
+npm start          # serves the client and runs the game server on :8080
+npm run smoke      # boots a server, connects two clients, drives a match
 ```
 
 ## The loop
 
-Plant your standard on open ground. Your levy grows with the land you hold, on a
-logistic curve, so small realms recover fast and huge ones plateau. Drag the
-**levy sent** slider, click a rival's land, and your border bleeds into theirs
-one field at a time — terrain and their troop density set the price per field.
-Coin accrues from population, land, towns and sea trade, and buys works and
-siege. Take **65%** of the realm, or be the last banner flying.
+Plant your standard on open ground. Your people divide into **civilians**, who
+work the land, **levies** in training, and **soldiers**, who are the only ones who
+can take or hold ground — and every soldier is a worker removed from the economy.
+Farms feed your population, blacksmiths forge the **arms** without which a host
+fights at a third strength, and towns turn labour into **ducats**. Click a rival's
+land and your border bleeds into theirs one field at a time, as a front, paying
+for terrain and fortification as it goes. Take **65%** of the realm, or be the
+last banner flying.
 
 ## How it maps to OpenFront
 
@@ -24,11 +28,16 @@ siege. Take **65%** of the realm, or be the last banner flying.
 | City | **Town** — raises your levy ceiling |
 | Defense Post | **Castle** — fortifies the ground in a radius |
 | Port | **Harbour** — trade coin, and a place to launch ships |
-| Missile Silo | **Siege Works** — unlocks siege engines |
-| SAM launcher | **Watchtower** — may bring incoming siege down |
+| Missile Silo | **Siege Works** — lets you lay sieges at all |
+| SAM launcher | **Watchtower** — the garrison harries besiegers |
 | Transport ship | **Longship** — carries your levy to a distant shore |
 | Warship | **War Galley** — holds water, sinks what passes |
-| Atom / Hydrogen / MIRV | **Trebuchet / Greek Fire / Plague Cart** |
+| Atom / Hydrogen / MIRV | **Battering Ram / Trebuchet / Siege Camp** |
+
+The siege tier is the one place the mapping breaks on purpose. Openfront's nukes
+fly across the map into a blast radius; a siege is *laid on your own frontier*
+and invests the ground in front of it until the walls come down. Nothing is
+fired at a map coordinate.
 
 Alliances, betrayal and oathbreaker status all carry over. Pacts run for a
 **term** rather than forever — see "endgame deadlock" below.
@@ -51,20 +60,22 @@ the cursor and offers only what applies there:
 |---|---|
 | a rival's land | march on them · land a longship · swear or break a pact · look upon their lands · loose siege |
 | open ground | claim it · land a longship |
-| your own ground | raise any of the five works, priced and greyed if you can't |
+| your own ground | raise any of the seven works, priced and greyed if you can't |
 | open water | send a war galley |
 
 Everything else:
 
 - **drag** pan · **scroll** zoom · **click the left panel** to find your lands
 - **left-click any land** to march on whoever holds it (open ground included)
-- **Works / Ships / Siege** at the bottom open a tray of what each costs and does
-- **1–5** pick a work to place · **Esc** cancel · **Space** cycle speed
-- **↑ / ↓** nudge the levy slider
+- **Realm / Works / Ships / Siege** at the bottom open a tray of what each costs and does
+- **1–7** pick a work to place · **Esc** cancel · **Space** cycle speed
+- **↑ / ↓** nudge the soldiers-sent slider
+- **Realm** at the bottom holds the worker priorities and mobilisation
 - click a house in the leaderboard for the same diplomacy options
 
-The game pauses when the tab is hidden (requestAnimationFrame stops), which is
-the behaviour you want for a single-player match.
+In single-player the game pauses when the tab is hidden (requestAnimationFrame
+stops), which is the behaviour you want. Online matches run on the server and
+keep going regardless.
 
 ## Releasing a change
 
@@ -107,12 +118,13 @@ ever copies from `shared/core.js`, so it cannot drift.
 
 ```bash
 ./tools/sim.sh 5 40 continents     # matches, lords, map preset
+./tools/doctrines.sh 6 24          # are the four playstyles balanced?
 ```
 
-There is no Node on this machine, so the harness runs under the JavaScriptCore
-shell that ships with macOS. Note also that a local preview server cannot read
-`~/Desktop` (macOS TCC denies it and it surfaces as a 404) — `./sync-preview.sh`
-copies the project into the session scratchpad first.
+These run under the JavaScriptCore shell that ships with macOS, so they need no
+install and no Node. Note that a local preview server cannot read `~/Desktop`
+(macOS TCC denies it and it surfaces as a 404) — `./sync-preview.sh` copies the
+project into the session scratchpad first.
 
 ## Balance, and how it got there
 
@@ -208,13 +220,33 @@ with four lords alive and nobody willing to move, all sworn to each other. Oaths
 now lapse after 130–260s, and the last three lords cannot swear at all. Every
 match has resolved since.
 
+## Multiplayer
+
+The server is authoritative. Clients send **intents** — march there, raise a farm
+here, mobilise to 40% — and the server decides what happens; nothing a client
+sends can touch another player's realm.
+
+```
+server/src/index.js   http + Socket.IO, static client, /healthz
+server/src/room.js    lobby, match lifecycle, tick loop, intent handling
+server/test/smoke.js  boots the server and drives two real clients through a match
+```
+
+- **10 Hz** simulation, **5 Hz** broadcast. The spec called for 20 Hz; this is a
+  game where a field changes hands every few seconds, so 20 doubles cost for
+  motion nobody perceives.
+- Ownership travels as **tile-flip deltas** — `[tile, owner, …]`, about five
+  bytes a field, so even a furious battle is roughly a kilobyte a second. The
+  client rebuilds terrain from the map seed rather than being sent it.
+- The lobby opens on the first arrival, counts down 60 seconds, and fills the
+  remaining seats with AI. A player who disconnects mid-match hands their realm
+  to the AI rather than freezing it.
+- `ALLOWED_ORIGINS` restricts who may open a socket. Leave it unset only in
+  development.
+
 ## Where this stops
 
-It is single-player against bots. The sim is deterministic given a seed and runs
-at ~0.28 ms/tick with 41 lords, so it would tolerate being moved behind an
-authoritative server for real multiplayer — that is the interesting next step,
-and the `//<CORE>` split already isolates exactly the code that would move.
-
-Smaller things left undone: no spawn-phase timer (you place, then the bots
-place), no fog of war (openfront has none either), and boats path with a plain
-BFS over water that is recomputed per voyage rather than cached.
+Players are **auto-seated** — choosing your own ground needs a placement phase.
+There is no persistence, no accounts and no matchmaking beyond one lobby at a
+time. No fog of war (openfront has none either), and boats path with a plain BFS
+over water recomputed per voyage rather than cached.
