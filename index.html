@@ -391,7 +391,7 @@ const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
 let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
 let pcol = [];                       // per-lord rgb, precomputed
 let cam = { x: 0, y: 0, z: 3 };
-let mode = 'attack', modeArg = null, roadFrom = -1;
+let mode = 'attack', modeArg = null;
 let hover = -1, hoverTile = -1;
 let speed = 1, running = false;
 const DPR = Math.min(2, window.devicePixelRatio || 1);
@@ -553,18 +553,18 @@ function render(now){
       c.stroke();
     }
   }
-  // the road being laid follows the cursor
-  if (mode === 'road' && roadFrom >= 0 && hoverTile >= 0){
-    c.strokeStyle = 'rgba(255,214,120,.9)'; c.setLineDash([6, 5]); c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(sx(roadFrom % game.W + 0.5), sy(((roadFrom / game.W) | 0) + 0.5));
-    c.lineTo(sx(hoverTile % game.W + 0.5), sy(((hoverTile / game.W) | 0) + 0.5));
-    c.stroke(); c.setLineDash([]);
-    const { d, cost } = game.roadCost(roadFrom, hoverTile);
-    const okLen = d <= ECON.ROAD_MAX;
-    c.font = '12px "Iowan Old Style", Palatino, Georgia, serif';
-    c.fillStyle = okLen ? '#f0e4c4' : '#d9714f';
-    c.fillText(okLen ? `${Math.round(d)} fields · ${cost}c` : 'too far', mouse.x + 14, mouse.y - 8);
+
+  // caravans on the roads
+  if (z > 1.2){
+    for (const v of game.caravans){
+      const px = sx(v.x + 0.5), py = sy(v.y + 0.5);
+      if (px < -10 || py < -10 || px > W + 10 || py > H + 10) continue;
+      const r = Math.max(1.2, z * 0.42);
+      c.fillStyle = '#f2e2b6';
+      c.fillRect(px - r, py - r * 0.7, r * 2, r * 1.4);
+      c.fillStyle = 'rgba(40,28,14,.75)';
+      c.fillRect(px - r, py + r * 0.5, r * 2, Math.max(0.7, r * 0.35));
+    }
   }
 
   // structures
@@ -752,7 +752,6 @@ const TOOLS = [
   { k:'harbor', cat:'works', kind:'build', arg:B_HARBOR, name:'Harbour',     hint:'trade coin, and ships to launch' },
   { k:'siege',  cat:'works', kind:'build', arg:B_SIEGE,  name:'Siege Works', hint:'lets you loose siege engines' },
   { k:'tower',  cat:'works', kind:'build', arg:B_TOWER,  name:'Watchtower',  hint:'may bring down incoming siege' },
-  { k:'road',   cat:'works', kind:'road',  arg:0,        name:'Road',        hint:'joins two works — trade and supply flow along it' },
   { k:'ship',   cat:'ships', kind:'ship',  arg:400,      name:'Longship',    hint:'carries your levy to a distant shore' },
   { k:'galley', cat:'ships', kind:'galley',arg:1000,     name:'War Galley',  hint:'holds water, sinks what passes' },
   { k:'ram',    cat:'siege', kind:'siege', arg:'ram',    name:'Battering Ram', hint:'breaks a gate — invests the ground close by' },
@@ -768,14 +767,12 @@ const CATS = [
 
 function toolCost(t){
   const me = game.players[game.humanId];
-  if (t.kind === 'road') return ECON.ROAD_PER_FIELD;
   if (t.kind === 'build') return me.costOf(t.arg);
   if (t.kind === 'siege') return SIEGE[t.arg].cost;
   return t.arg;
 }
 function toolReady(t){
   const me = game.players[game.humanId];
-  if (t.kind === 'road') return me.nodes.length >= 2;
   if (me.ducats < toolCost(t)) return false;
   if (t.kind === 'siege' && !me.st[B_SIEGE].size) return false;
   if ((t.kind === 'ship' || t.kind === 'galley') && !me.coast.size) return false;
@@ -889,12 +886,10 @@ function refreshTools(){
     const what = mode === 'build'  ? 'Placing a ' + BUILDS[modeArg].name
                : mode === 'siege'  ? 'Laying a ' + SIEGE[modeArg].name.toLowerCase()
                : mode === 'ship'   ? 'Launching a longship'
-               : mode === 'road'   ? (roadFrom < 0 ? 'Laying a road' : 'Laying a road — choose the far end')
                : 'Sending a war galley';
     const where = mode === 'build' ? 'click your own ground'
                 : mode === 'siege' ? 'click the ground to invest'
                 : mode === 'ship'  ? 'click the shore to land on'
-                : mode === 'road'  ? 'click one of your works, then another'
                 : 'click open water';
     $('armedTxt').innerHTML = `<b>${what}</b> — ${where}`;
   }
@@ -905,7 +900,6 @@ function refreshTools(){
   }
 }
 function setMode(m, arg){
-  if (m !== 'road') roadFrom = -1;
   mode = m; modeArg = arg === undefined ? null : arg;
   cv.style.cursor = m === 'attack' ? 'crosshair' : 'copy';
   if (m !== 'attack') showTray(null);
@@ -950,30 +944,6 @@ function actAttack(t){
   if (o >= 0) toast(`You march on <b>${game.players[o].name}</b>.`, 'war');
   return true;
 }
-// Two clicks: the work you start from, then the one you join it to.
-function actRoad(t){
-  const me = game.players[game.humanId];
-  if (game.owner[t] !== me.id || !game.build[t]){
-    toast('A road runs from one of your works to another.');
-    return false;
-  }
-  if (roadFrom < 0){
-    roadFrom = t;
-    toast(`From ${BUILDS[game.build[t]].name} — now choose the work to join it to.`);
-    return true;
-  }
-  if (roadFrom === t){ roadFrom = -1; return false; }
-  const { d, cost } = game.roadCost(roadFrom, t);
-  if (NET.online){ NET.send({ do:'road', a: roadFrom, b: t }); }
-  else {
-    const err = game.layRoad(me.id, roadFrom, t);
-    if (err){ toast(err); roadFrom = -1; return false; }
-    toast(`Road laid — ${Math.round(d)} fields, ${cost} ducats.`, 'good');
-  }
-  roadFrom = -1;
-  return true;
-}
-
 function actBuild(t, type){
   if (NET.online){ NET.send({ do:'build', tile:t, type }); return true; }
   const err = game.place(game.humanId, t, type);
@@ -1064,7 +1034,6 @@ function onClick(px, py){
     return;
   }
   if (game.phase !== 'war') return;
-  if (mode === 'road'){ actRoad(t); return; }
   if (mode === 'build'){ if (actBuild(t, modeArg)) setMode('attack'); return; }
   if (mode === 'siege'){ if (actSiege(t, modeArg)) setMode('attack'); return; }
   if (mode === 'ship'){  if (actShip(t))            setMode('attack'); return; }
@@ -1468,6 +1437,7 @@ function onServerState(m){
   }
   game.time = m.t; game.aliveCount = m.alive; game.leader = m.leader;
   game.boats = (m.boats || []).map(b => ({ owner:b[0], x:b[1], y:b[2], kind:b[3], dead:false }));
+  game.caravans = (m.vans || []).map(v => ({ owner:v[0], x:v[1], y:v[2], dead:false }));
   game.sieges = (m.sieges || []).map(s => ({ owner:s[0], tile:s[1], kind:s[2], t:s[3], dur:1, dead:false }));
   for (const e of m.events || []) toast(e.text, e.kind);
 }
@@ -1493,15 +1463,15 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 
 const CHANGELOG = [
-  { v:'0.10.0', when:'roads', notes:[
-    '<b>Roads</b>. Join two of your works with a road and trade rises — the better connected your network, the more each town and harbour earns, up to +130%. This is what lets a small, well-joined realm out-earn a sprawling one.',
-    '<b>Supply.</b> Ground within reach of a network that has a town on it is supplied. An advance beyond supply pays more for every field and creeps at half speed — over twenty seconds it takes a third less ground.',
-    'Cut the network and the front in front of it goes hungry: take the ground under a work and every road to it is dropped, splitting what it held together. <b>That is what makes storming a castle worth doing.</b>',
-    'Pick <b>Road</b> from Works, click one of your works, then another. The cost follows the distance.',
-    'Lords lay roads of their own now.',
+  { v:'0.11.0', when:'roads and caravans', notes:[
+    '<b>Roads build themselves.</b> Raise two works within reach of each other and a road appears between them — no cost, nothing to click. Your decision is <i>where to build</i>; the network follows.',
+    '<b>Caravans</b> run those roads on their own, carrying goods between works and paying out when they arrive.',
+    'Trade rises with how well joined your works are, up to +130% — six connected works are worth far more than six scattered ones.',
+    '<b>Supply.</b> Ground within reach of a network that has a town on it is supplied. An advance beyond supply pays more for every field and creeps at half speed — a third less ground over twenty seconds.',
+    'Take the ground under a work and its roads vanish with it, splitting the network and starving whatever it fed. <b>That is what makes storming a castle worth doing.</b>',
     'Fixed: starting a solo match while an online one was still connected let the server keep overwriting your local game.',
   ]},
   { v:'0.9.0', when:'Europe', notes:[

@@ -268,6 +268,7 @@ class Room {
       full, owners, builds, lords, roads,
       alive: g.aliveCount, leader: g.leader,
       boats: g.boats.map(b => [b.owner, +b.x.toFixed(1), +b.y.toFixed(1), b.kind]),
+      vans: g.caravans.map(c => [c.owner, +c.x.toFixed(1), +c.y.toFixed(1)]),
       sieges: g.sieges.map(s => [s.owner, s.tile, s.kind, +(s.t / s.dur).toFixed(2)]),
       events: events.map(e => ({ text: e.text, kind: e.kind, who: e.who })),
     });
@@ -358,13 +359,6 @@ class Room {
       case 'break': {
         const id = +msg.id;
         if (me.allies.has(id)) g.breakAlly(me.id, id, true);
-        return;
-      }
-      case 'road': {
-        const a = Number.isInteger(msg.a) && msg.a >= 0 && msg.a < g.N ? msg.a : -1;
-        const b = Number.isInteger(msg.b) && msg.b >= 0 && msg.b < g.N ? msg.b : -1;
-        if (a < 0 || b < 0) return;
-        this.nope(socketId, g.layRoad(me.id, a, b));
         return;
       }
       case 'realm': {

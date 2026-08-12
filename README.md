@@ -151,8 +151,14 @@ ground has to be taken across them; at 65% no match resolved inside 45 minutes
 
 ## Roads, trade and supply
 
-Works — farms, forges, towns, castles, harbours — are the **nodes** of a network.
-A road is an **edge** you pay for by the field, and it does two things:
+Works — farms, forges, towns, castles, harbours — are the **nodes** of a network,
+and **roads build themselves**: every work links to the nearest works it can
+reach, as a minimum spanning forest. There is nothing to buy and nothing to
+click. The player's decision is *where to build*; the network is the
+consequence. **Caravans** then run those roads unprompted, carrying goods
+between works and paying out on arrival.
+
+The network does two things:
 
 **Trade follows connection.** Each town and harbour earns more the larger the
 connected component it sits on (`ROAD_LINK` per extra work, capped at +130%), so
@@ -168,7 +174,8 @@ Taking the ground under a work drops every road to it, which can split a network
 in two and starve a whole front. That is what makes storming a castle worth the
 cost, rather than walking around it.
 
-`node tools/roads.js` checks the lot: that joining works raises trade, that
+`node tools/roads.js` checks the lot: that works link themselves, that the road
+is free, that trade rises with connection, that caravans run and pay, that
 supply reaches from a town and not beyond it, and that losing a work severs what
 it held together.
 

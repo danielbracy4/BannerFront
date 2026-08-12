@@ -126,8 +126,10 @@ const ECON = {
   WORKS_DISCOUNT:   0.35,   // at full employment
 
   // roads
-  ROAD_PER_FIELD:   14,     // ducats to lay one field of road
-  ROAD_MAX:         46,     // longest single road, in fields
+  ROAD_MAX:         46,     // furthest two works will link up, in fields
+  CARAVAN_SPEED:     7,     // fields a second
+  CARAVAN_VALUE:     9,     // ducats a caravan delivers
+  CARAVAN_EVERY:     4,     // seconds between a work sending one out
   ROAD_LINK:        0.16,   // trade bonus per extra work on the same network
   ROAD_LINK_CAP:    1.30,   // ...up to this much on top
   SUPPLY_R:         30,     // how far a supplied network reaches from its works
@@ -475,15 +477,42 @@ class Lord {
 
   // Which works are joined to which, following the roads we have laid. Cached
   // until a road or a work changes, because it is read every tick.
+  // Roads are not built, they appear. Every work links to the nearest works it
+  // can reach, as a minimum spanning forest — so the network is a consequence
+  // of where you chose to build, not a thing to micromanage.
+  layout(){
+    const nodes = this.nodes;
+    const W = this.g.W;
+    if (nodes.length < 2){ this.roads = []; return nodes; }
+    const pairs = [];
+    for (let i = 0; i < nodes.length; i++){
+      for (let j = i + 1; j < nodes.length; j++){
+        const a = nodes[i], b = nodes[j];
+        const d = Math.hypot(a % W - b % W, ((a / W) | 0) - ((b / W) | 0));
+        if (d <= ECON.ROAD_MAX) pairs.push([d, i, j]);
+      }
+    }
+    pairs.sort((x, y) => x[0] - y[0]);
+    const parent = nodes.map((_, i) => i);
+    const find = i => { while (parent[i] !== i){ parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const roads = [];
+    for (const [, i, j] of pairs){
+      const a = find(i), b = find(j);
+      if (a === b) continue;              // already joined — one road is enough
+      parent[a] = b;
+      roads.push({ a: nodes[i], b: nodes[j] });
+    }
+    this.roads = roads;
+    return nodes;
+  }
+
   network(){
     if (!this.netDirty && this.net) return this.net;
-    const nodes = this.nodes;
+    const nodes = this.layout();
     const idx = new Map();
     nodes.forEach((t, i) => idx.set(t, i));
     const parent = nodes.map((_, i) => i);
     const find = i => { while (parent[i] !== i){ parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-    // a road only joins anything while we still hold both ends
-    this.roads = this.roads.filter(r => idx.has(r.a) && idx.has(r.b));
     for (const r of this.roads){
       const a = find(idx.get(r.a)), b = find(idx.get(r.b));
       if (a !== b) parent[a] = b;
@@ -667,7 +696,7 @@ class Game {
     this.time = 0; this.ticks = 0;
     this.phase = 'place';                 // place -> war -> done
     this.players = []; this.humanId = -1;
-    this.attacks = []; this.boats = []; this.sieges = [];
+    this.attacks = []; this.boats = []; this.sieges = []; this.caravans = [];
     this.events = []; this.dirty = []; this.dirtyAll = true; this.asks = [];
     this.buildDirty = [];   // works raised or razed since the last broadcast
     this.winner = -1; this.leader = -1; this.leadShare = 0; this.aliveCount = 0;
@@ -1068,32 +1097,6 @@ class Game {
     return null;
   }
 
-  // Roads join two of your own works. They are the cheapest thing in the game
-  // to build and the most valuable to take, because the whole network hangs on
-  // them: cut one and a province can fall out of supply.
-  roadCost(a, b){
-    const W = this.W;
-    const d = Math.hypot(a % W - b % W, ((a / W) | 0) - ((b / W) | 0));
-    return { d, cost: Math.round(d * ECON.ROAD_PER_FIELD) };
-  }
-
-  layRoad(ownerId, a, b){
-    const p = this.players[ownerId];
-    if (a === b) return 'a road must run between two works';
-    if (!this.build[a] || !this.build[b]) return 'a road runs from one work to another';
-    if (this.owner[a] !== ownerId || this.owner[b] !== ownerId) return 'both ends must be yours';
-    if (p.roads.some(r => (r.a === a && r.b === b) || (r.a === b && r.b === a)))
-      return 'that road is already laid';
-    const { d, cost } = this.roadCost(a, b);
-    if (d > ECON.ROAD_MAX) return 'too far — build a work between them first';
-    if (p.ducats < cost) return `not enough coin (${cost} needed)`;
-    p.ducats -= cost;
-    p.roads.push({ a, b });
-    p.netDirty = true;
-    this.roadDirty = true;
-    return null;
-  }
-
   raze(tile){
     const b = this.build[tile];
     if (!b) return;
@@ -1102,6 +1105,50 @@ class Game {
     if (b === B_CASTLE) this.stampCastle(tile, -1);
     this.build[tile] = 0;
     this.dirty.push(tile); this.buildDirty.push(tile);
+  }
+
+  // ---------------------------------------------------------------- caravans
+  // Wagons run the roads on their own, carrying goods between works and paying
+  // out when they arrive. The player builds the works; the trade takes care of
+  // itself.
+  stepCaravans(dt){
+    for (const c of this.caravans){
+      if (c.dead) continue;
+      const p = this.players[c.owner];
+      if (!p.alive || this.owner[c.b] !== c.owner || this.owner[c.a] !== c.owner){
+        c.dead = true; continue;                 // the road under it is gone
+      }
+      const bx = c.b % this.W, by = (c.b / this.W) | 0;
+      const dx = bx - c.x, dy = by - c.y, d = Math.hypot(dx, dy);
+      const step = ECON.CARAVAN_SPEED * dt;
+      if (d <= step){
+        p.ducats += ECON.CARAVAN_VALUE * (1 + p.linkBonus);
+        c.dead = true;
+      } else {
+        c.x += dx / d * step; c.y += dy / d * step;
+      }
+    }
+    if (this.caravans.length) this.caravans = this.caravans.filter(c => !c.dead);
+  }
+
+  sendCaravans(dt){
+    this._vanT = (this._vanT || 0) + dt;
+    if (this._vanT < 1) return;
+    this._vanT = 0;
+    if (this.caravans.length > 400) return;
+    for (const p of this.players){
+      if (!p.alive || !p.roads.length) continue;
+      if (this.time < (p.vanAt || 0)) continue;
+      p.vanAt = this.time + ECON.CARAVAN_EVERY / Math.min(8, p.roads.length) + this.rand();
+      // a busy network puts several wagons on the road at once
+      const send = Math.min(3, 1 + (p.roads.length / 10) | 0);
+      for (let k = 0; k < send; k++){
+        const r = p.roads[(this.rand() * p.roads.length) | 0];
+        const flip = this.rand() < 0.5;
+        const a = flip ? r.b : r.a, b = flip ? r.a : r.b;
+        this.caravans.push({ owner: p.id, a, b, x: a % this.W, y: (a / this.W) | 0, dead: false });
+      }
+    }
   }
 
   // ------------------------------------------------------------------ ships
@@ -1513,36 +1560,6 @@ class Game {
   // A lord with harbours and coin keeps the sea lanes near them. Without this
   // no AI ever built a galley, so the whole naval game only existed if a human
   // happened to buy one.
-  // A lord joins each new work to the nearest one it already holds, when it can
-  // afford to. Without this the AI would never build a network and the whole
-  // road economy would only exist for human players.
-  botRoads(p){
-    const nodes = p.nodes;
-    if (nodes.length < 2 || p.ducats < 400) return false;
-    const { comp } = p.network();
-    // a work that stands alone, or on a smaller island of the network
-    let lone = -1, loneSize = 1e9;
-    for (const t of nodes){
-      const c = comp.get(t);
-      if (c && c.size < loneSize){ loneSize = c.size; lone = t; }
-    }
-    if (lone < 0 || loneSize > 3) return false;
-    let best = -1, bestD = 1e9;
-    for (const t of nodes){
-      if (t === lone) continue;
-      const c = comp.get(t);
-      if (c && c.size === loneSize && comp.get(lone) && comp.get(lone).size === c.size){
-        // same island — joining them gains nothing
-        const same = p.roads.some(r => (r.a === lone && r.b === t) || (r.a === t && r.b === lone));
-        if (same) continue;
-      }
-      const d = this.roadCost(lone, t).d;
-      if (d < bestD && d <= ECON.ROAD_MAX){ bestD = d; best = t; }
-    }
-    if (best < 0) return false;
-    return this.layRoad(p.id, lone, best) === null;
-  }
-
   botGalley(p){
     if (!p.coast.size || !p.st[B_HARBOR].size) return false;
     if (p.ducats < 1400) return false;
@@ -1601,7 +1618,6 @@ class Game {
     this.botBuild(p);
     this.botMobilise(p);
     this.botGalley(p);
-    this.botRoads(p);
     const ring = this.ringOf(p, 420);
     if (this.botSiege(p, ring)) return;
 
@@ -1786,6 +1802,8 @@ class Game {
     }
 
     this.stepBoats(dt);
+    this.stepCaravans(dt);
+    this.sendCaravans(dt);
     this.stepSieges(dt);
     this.trade(dt);
 
