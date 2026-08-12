@@ -12,6 +12,8 @@ const { makeMatch, CFG, SECTORS, BUILDS, SIEGE, B_ALL } = core;
 const TICK_HZ      = CFG.TICK_HZ;      // 10 — the simulation rate
 const BROADCAST_HZ = 5;                // deltas to clients twice per tick
 const LOBBY_SECS   = 60;
+const PLACE_SECS   = 25;               // time to choose your ground
+const PLACE_MIN    = 16;               // fields between rival standards
 const MAX_LORDS    = 41;               // one human seat + AI fill up to this
 
 let nextRoomId = 1;
@@ -24,7 +26,7 @@ class Room {
     this.targetLords = Math.min(MAX_LORDS, (opts && opts.lords) || 41);
     this.seed = (Math.random() * 1e9) | 0;
 
-    this.phase = 'lobby';              // lobby -> war -> done
+    this.phase = 'lobby';              // lobby -> placing -> war -> done
     this.seats = [];                   // { socketId, name, colour, lordId }
     this.game = null;
     this.openedAt = Date.now();
@@ -46,7 +48,7 @@ class Room {
       socketId: socket.id,
       name: String(name || 'A Lord').slice(0, 18),
       colour: /^#[0-9a-f]{6}$/i.test(colour || '') ? colour : null,
-      lordId: -1,
+      lordId: -1, seated: false,
     });
     socket.join(this.id);
     this.sendLobby();
@@ -108,20 +110,16 @@ class Room {
       seat.lordId = lord.id;
     });
 
-    // v1 seats everyone automatically. Letting players choose their own ground
-    // needs a placement phase, which is the next thing worth adding.
-    const minDist = Math.max(9, Math.sqrt(g.landCount / (g.players.length + 2)) * 0.85);
-    for (const p of g.players){
-      const t = g.pickSeat(minDist);
-      if (t >= 0) g.seat(p, t);
-    }
-    g.audit();
-    g.phase = 'war';
+    // Nobody is seated yet — players choose their own ground first. Bots are
+    // placed only once the humans have had their pick, so a human never has to
+    // fight for a spot with an AI that chose instantly.
+    this.phase = 'placing';
+    this.placeLeft = PLACE_SECS;
 
     this.io.to(this.id).emit('start', {
       room: this.id,
       seed: this.seed, preset: this.preset, w: g.W, h: g.H,
-      tickHz: TICK_HZ,
+      tickHz: TICK_HZ, placing: PLACE_SECS,
       lords: g.players.map(p => ({ id: p.id, name: p.name, colour: p.color, bot: p.bot })),
       you: Object.fromEntries(this.seats.map(s => [s.socketId, s.lordId])),
     });
@@ -130,9 +128,71 @@ class Room {
     // here instead left every client with an empty map: the server had already
     // seated all 41 lords, and nobody was ever told.
     g.dirty.length = 0; g.dirtyAll = true;
+    this.castTimer = setInterval(() => this.broadcast(), 1000 / BROADCAST_HZ);
+    this.placeTimer = setInterval(() => this.placeTick(), 1000);
+  }
+
+  placeTick(){
+    if (this.phase !== 'placing') return;
+    this.placeLeft--;
+    this.io.to(this.id).emit('placing', {
+      seconds: Math.max(0, this.placeLeft),
+      seated: this.seats.filter(s => s.seated).length,
+      humans: this.seats.length,
+    });
+    // everyone has chosen — no reason to make them wait out the clock
+    if (this.placeLeft <= 0 || (this.seats.length && this.seats.every(s => s.seated))) this.beginWar();
+  }
+
+  // Is this a fair place to plant a standard?
+  canSeat(g, tile){
+    if (!Number.isInteger(tile) || tile < 0 || tile >= g.N) return 'that is not on the map';
+    if (!g.isLand(tile)) return 'plant your standard on dry land';
+    if (g.terrain[tile] === 5) return 'nothing grows on the peaks — choose kinder ground';
+    if (g.owner[tile] >= 0) return 'that ground is already claimed';
+    const x = tile % g.W, y = (tile / g.W) | 0;
+    for (const p of g.players){
+      if (!p.alive || !p.tiles) continue;
+      if (Math.hypot(x - p.cx, y - p.cy) < PLACE_MIN) return 'too close to another lord — spread out';
+    }
+    return null;
+  }
+
+  seatPlayer(socketId, tile){
+    const g = this.game;
+    if (!g || this.phase !== 'placing') return;
+    const seat = this.seats.find(s => s.socketId === socketId);
+    if (!seat || seat.lordId < 0 || seat.seated) return;
+    const err = this.canSeat(g, tile);
+    if (err) return this.nope(socketId, err);
+    g.seat(g.players[seat.lordId], tile);
+    seat.seated = true;
+    this.io.to(socketId).emit('seated', { tile });
+  }
+
+  beginWar(){
+    if (this.phase !== 'placing') return;
+    clearInterval(this.placeTimer); this.placeTimer = null;
+    this.phase = 'war';
+    const g = this.game;
+
+    // anyone who never chose, and then every AI lord
+    const minDist = Math.max(9, Math.sqrt(g.landCount / (g.players.length + 2)) * 0.85);
+    for (const seat of this.seats){
+      if (seat.seated || seat.lordId < 0) continue;
+      const t = g.pickSeat(minDist);
+      if (t >= 0) g.seat(g.players[seat.lordId], t);
+    }
+    for (const p of g.players){
+      if (p.tiles) continue;
+      const t = g.pickSeat(minDist);
+      if (t >= 0) g.seat(p, t);
+    }
+    g.audit();
+    g.phase = 'war';
+    this.io.to(this.id).emit('war', { lords: g.aliveCount });
     const step = 1 / TICK_HZ;
     this.tickTimer = setInterval(() => this.tick(step), 1000 / TICK_HZ);
-    this.castTimer = setInterval(() => this.broadcast(), 1000 / BROADCAST_HZ);
   }
 
   tick(step){
@@ -146,7 +206,7 @@ class Room {
   // five bytes a field, so even a furious battle is a kilobyte a second.
   broadcast(){
     const g = this.game;
-    if (!g) return;
+    if (!g) return;   // runs during placing too, so claims appear as they are made
 
     let owners = null, full = false;
     if (g.dirtyAll){
@@ -206,7 +266,7 @@ class Room {
 
   finish(){
     this.phase = 'done';
-    clearInterval(this.tickTimer); clearInterval(this.castTimer);
+    clearInterval(this.tickTimer); clearInterval(this.castTimer); clearInterval(this.placeTimer);
     this.tickTimer = this.castTimer = null;
     const g = this.game;
     this.io.to(this.id).emit('over', {
@@ -223,7 +283,9 @@ class Room {
 
   intent(socketId, msg){
     const g = this.game;
-    if (!g || g.phase !== 'war' || !msg || typeof msg.do !== 'string') return;
+    if (!g || !msg || typeof msg.do !== 'string') return;
+    if (msg.do === 'seat') return this.seatPlayer(socketId, msg.tile);
+    if (g.phase !== 'war') return;
     const seat = this.seats.find(s => s.socketId === socketId);
     if (!seat || seat.lordId < 0) return;
     const me = g.players[seat.lordId];

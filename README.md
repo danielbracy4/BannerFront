@@ -241,12 +241,17 @@ server/test/smoke.js  boots the server and drives two real clients through a mat
 - The lobby opens on the first arrival, counts down 60 seconds, and fills the
   remaining seats with AI. A player who disconnects mid-match hands their realm
   to the AI rather than freezing it.
+- **Placement**: when the lobby closes, players get 25 seconds on an empty map to
+  plant their own standard, watching rivals' claims appear as they are made. The
+  server validates every choice (dry land, not a peak, unclaimed, at least 16
+  fields from another lord). AI lords are seated only *after* the humans have
+  chosen, so no player ever loses a spot to an instant AI. The war starts early
+  once everyone has planted.
 - `ALLOWED_ORIGINS` restricts who may open a socket. Leave it unset only in
   development.
 
 ## Where this stops
 
-Players are **auto-seated** — choosing your own ground needs a placement phase.
 There is no persistence, no accounts and no matchmaking beyond one lobby at a
 time. No fog of war (openfront has none either), and boats path with a plain BFS
 over water recomputed per voyage rather than cached.

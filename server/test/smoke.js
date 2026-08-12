@@ -7,6 +7,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const { io } = require('socket.io-client');
+const core = require('../../shared/core.js');
 
 const PORT = 8099;
 const ROOT = path.resolve(__dirname, '../..');
@@ -58,6 +59,49 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await wait(1200);
 
   check(!!seen.start, 'match started');
+
+  // --- placement: players choose their own ground -------------------------
+  check(seen.start.placing > 0, `players get ${seen.start.placing}s to choose their ground`);
+  const cg = new core.Game({ seed: seen.start.seed, preset: seen.start.preset });
+  let land = -1, far = -1;
+  for (let t = 0; t < cg.N; t++) if (cg.terrain[t] === 2){ land = t; break; }
+  for (let t = cg.N - 1; t >= 0; t--) if (cg.terrain[t] === 2){ far = t; break; }
+
+  const refusedSea = new Promise(r => A.once('nope', r));
+  A.emit('intent', { do:'seat', tile: 0 });                       // open sea
+  const sea = await Promise.race([refusedSea, wait(2500).then(() => null)]);
+  check(!!sea, 'a standard in the sea is refused' + (sea ? ` ("${sea.why}")` : ''));
+
+  const seatedAck = new Promise(r => A.once('seated', r));
+  A.emit('intent', { do:'seat', tile: land });
+  check(!!(await Promise.race([seatedAck, wait(3000).then(() => null)])),
+        'a standard on open land is accepted');
+
+  // Must be *land* close to A, or the refusal would be "not dry land" and the
+  // proximity rule would go untested.
+  // outside A's claimed blob (radius ~3) but inside the 16-field spacing rule,
+  // or the refusal comes from a different rule and proves nothing
+  let near = -1;
+  for (let r = 6; r <= 13 && near < 0; r++){
+    for (let a = 0; a < 24; a++){
+      const dx = Math.round(Math.cos(a / 24 * Math.PI * 2) * r);
+      const dy = Math.round(Math.sin(a / 24 * Math.PI * 2) * r);
+      const t = land + dy * cg.W + dx;
+      if (t < 0 || t >= cg.N) continue;
+      if (cg.terrain[t] === 2){ near = t; break; }
+    }
+  }
+  const squatted = new Promise(r => B.once('nope', r));
+  B.emit('intent', { do:'seat', tile: near });
+  const squat = await Promise.race([squatted, wait(2500).then(() => null)]);
+  check(!!squat && /close/.test(squat.why),
+        'a rival cannot plant beside you' + (squat ? ` ("${squat.why}")` : ' — no refusal'));
+
+  const warBegun = new Promise(r => A.once('war', r));
+  B.emit('intent', { do:'seat', tile: far });
+  const war = await Promise.race([warBegun, wait(30000).then(() => null)]);
+  check(!!war, 'war begins early once every player has chosen' + (war ? ` (${war.lords} lords)` : ''));
+
   if (!seen.start) return done(1);
   const myLord = seen.start.you[A.id];
   check(Number.isInteger(myLord) && myLord >= 0, `client A owns lord #${myLord}`);

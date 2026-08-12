@@ -257,9 +257,9 @@
 
 <div class="hud" id="hud" style="display:none">
   <div id="topbar" class="panel">
-    <span class="cap">Leader</span><b id="tpct">0.0%</b>
+    <span class="cap" id="capLeader">Leader</span><b id="tpct">0.0%</b>
     <div class="tsep"></div>
-    <span class="cap">Lords</span><b id="tlords">0</b>
+    <span class="cap" id="capLords">Lords</span><b id="tlords">0</b>
     <div class="tsep"></div>
     <span class="cap">Age</span><b id="clock">0:00</b>
     <div class="tsep"></div>
@@ -972,6 +972,11 @@ function onClick(px, py){
   if (game.phase === 'place'){
     if (game.terrain[t] < T_PLAIN) return toast('Plant your standard on dry land.');
     if (game.terrain[t] === T_PEAK) return toast('Nothing grows on the peaks — choose kinder ground.');
+    if (NET.online){
+      if (NET.seated) return toast('Your standard is already planted.');
+      NET.send({ do:'seat', tile: t });   // the server decides if it is fair
+      return;
+    }
     beginWar(t);
     return;
   }
@@ -1128,9 +1133,16 @@ function updateHUD(){
 
   const t = Math.floor(game.time);
   $('clock').textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
-  $('tlords').textContent = game.aliveCount || 0;
-  const lead = game.leader >= 0 ? game.players[game.leader] : null;
-  $('tpct').textContent = lead ? (lead.tiles / game.landCount * 100).toFixed(1) + '%' : '—';
+  if (game.phase === 'place' && NET.online){
+    $('capLeader').textContent = 'Choose';
+    $('capLords').textContent = 'Planted';
+  } else {
+    $('capLeader').textContent = 'Leader';
+    $('capLords').textContent = 'Lords';
+    $('tlords').textContent = game.aliveCount || 0;
+    const lead = game.leader >= 0 ? game.players[game.leader] : null;
+    $('tpct').textContent = lead ? (lead.tiles / game.landCount * 100).toFixed(1) + '%' : '—';
+  }
 
   // new events
   for (; lastEvent < game.events.length; lastEvent++){
@@ -1241,7 +1253,7 @@ const NET = {
   // Served from the same host in production; a page hosted elsewhere dials out.
   url: (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || /railway\.app$/.test(location.hostname))
        ? '' : 'https://bannerfront-production.up.railway.app',
-  sock: null, online: false, myLord: -1, lords: [], joined: false,
+  sock: null, online: false, myLord: -1, lords: [], joined: false, seated: false,
 
   lib(cb){
     if (window.io) return cb(true);
@@ -1271,7 +1283,11 @@ const NET = {
       // a refused order must say why, or the player just sees nothing happen
       sock.on('nope',  m => toast((m && m.why) || 'That order was refused.'));
       sock.on('lobby', m => onServerLobby(m));
-      sock.on('start', m => onServerStart(m));
+      sock.on('start',   m => onServerStart(m));
+      sock.on('placing', m => onServerPlacing(m));
+      sock.on('war',     m => onServerWar(m));
+      sock.on('seated',  m => onServerSeated(m));
+      sock.on('nope',    m => toast((m && m.why) || 'That cannot be done.', 'war'));
       sock.on('state', m => onServerState(m));
       sock.on('over',  m => onServerOver(m));
       sock.on('disconnect', () => {
@@ -1303,8 +1319,40 @@ function onServerStart(m){
   clearInterval(lobbyTimer); lobbyTimer = null;
   $('lobby').style.display = 'none';
   startMatch();
+  if (m.placing){
+    NET.seated = false;
+    game.phase = 'place';
+    setMode('attack');
+    banner('Choose your ground', 'click anywhere on land to plant your standard', 4000);
+  } else {
+    game.phase = 'war';
+    banner('The war begins', `${NET.lords.length} banners fly`, 2600);
+  }
+}
+
+// The placement clock, and how many rivals have already planted.
+function onServerPlacing(m){
+  if (!game || game.phase !== 'place') return;
+  const left = Math.max(0, m.seconds | 0);
+  $('tpct').textContent = left + 's';
+  $('tlords').textContent = m.seated + '/' + m.humans;
+  if (!NET.seated && left <= 5) banner('Choose your ground', `${left}s — or one will be chosen for you`, 1200);
+}
+
+function onServerSeated(m){
+  NET.seated = true;
+  const me = game.players[NET.myLord];
+  toast('Your standard is planted. Waiting for the other lords…', 'good');
+  banner('Standard planted', 'waiting for the others', 2200);
+  if (me && me.tiles){ cam.x = me.cx; cam.y = me.cy; cam.z = Math.max(cam.z, 5); clampCam(); }
+}
+
+function onServerWar(m){
+  if (!game) return;
   game.phase = 'war';
-  banner('The war begins', `${NET.lords.length} banners fly`, 2600);
+  const me = game.players[NET.myLord];
+  if (me && me.tiles){ cam.x = me.cx; cam.y = me.cy; clampCam(); }
+  banner('The war begins', `${m.lords} banners fly`, 2600);
 }
 
 function onServerState(m){
@@ -1350,9 +1398,16 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 
 const CHANGELOG = [
+  { v:'0.8.1', when:'placement', notes:[
+    'You <b>choose your own ground</b>. When the horn sounds you get 25 seconds on an empty map to plant your standard where you like.',
+    'Rival standards appear as they are planted, so you can pick a quiet corner — or crowd a neighbour deliberately.',
+    'You cannot plant in the sea, on a peak, on claimed ground, or within 16 fields of another lord.',
+    'AI lords are seated <b>after</b> the players have chosen, so you are never fighting an instant AI for a spot. Anyone who does not choose in time is placed for them.',
+    'The war starts early once every player has planted.',
+  ]},
   { v:'0.8.0', when:'multiplayer', notes:[
     '<b>Online play.</b> Matches now run on a server that owns the world. You send orders; it decides what happens and tells every player the same truth.',
     'The lobby is real: it opens when the first player arrives, counts down 60 seconds while others join, and fills the remaining seats with AI.',
