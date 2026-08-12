@@ -125,6 +125,15 @@ const ECON = {
   // works: idle construction capacity discounts what you build
   WORKS_DISCOUNT:   0.35,   // at full employment
 
+  // roads
+  ROAD_PER_FIELD:   14,     // ducats to lay one field of road
+  ROAD_MAX:         46,     // longest single road, in fields
+  ROAD_LINK:        0.16,   // trade bonus per extra work on the same network
+  ROAD_LINK_CAP:    1.30,   // ...up to this much on top
+  SUPPLY_R:         30,     // how far a supplied network reaches from its works
+  UNSUPPLIED:       1.55,   // an unsupplied advance pays this much more a field
+  UNSUPPLIED_RATE:  0.55,   // ...and creeps at this share of the usual speed
+
   TRAIN_TIME:       42,     // seconds for a levy to become a soldier
   DEMOB_RETURN:     0.6,    // share of arms recovered when disbanding
 };
@@ -417,6 +426,9 @@ class Lord {
     this.nextThink = 0;
     this.tradeAt = 0;
     this.home = null;      // seat of power on the Europe map, if any
+    this.roads = [];       // { a, b } — both ends are works of ours
+    this.net = null;       // cached: tile -> component id, and each size
+    this.netDirty = true;
     this.siegeAt = 0;
     // bot temperament
     const r = g.rand;
@@ -454,6 +466,70 @@ class Lord {
     const cap = this.jobCap[sector];
     return cap > 0 ? Math.min(1, (this.jobs[sector] || 0) / cap) : 0;
   }
+  // Every work of ours, in one list — the nodes of the road network.
+  get nodes(){
+    const out = [];
+    for (const b of B_ALL) for (const t of this.st[b]) out.push(t);
+    return out;
+  }
+
+  // Which works are joined to which, following the roads we have laid. Cached
+  // until a road or a work changes, because it is read every tick.
+  network(){
+    if (!this.netDirty && this.net) return this.net;
+    const nodes = this.nodes;
+    const idx = new Map();
+    nodes.forEach((t, i) => idx.set(t, i));
+    const parent = nodes.map((_, i) => i);
+    const find = i => { while (parent[i] !== i){ parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    // a road only joins anything while we still hold both ends
+    this.roads = this.roads.filter(r => idx.has(r.a) && idx.has(r.b));
+    for (const r of this.roads){
+      const a = find(idx.get(r.a)), b = find(idx.get(r.b));
+      if (a !== b) parent[a] = b;
+    }
+    const size = new Map(), hasTown = new Map();
+    nodes.forEach((t, i) => {
+      const root = find(i);
+      size.set(root, (size.get(root) || 0) + 1);
+      if (this.g.build[t] === B_TOWN) hasTown.set(root, true);
+    });
+    const comp = new Map();          // node tile -> { size, fed }
+    nodes.forEach((t, i) => {
+      const root = find(i);
+      comp.set(t, { size: size.get(root), fed: !!hasTown.get(root) });
+    });
+    this.netDirty = false;
+    return (this.net = { comp, nodes });
+  }
+
+  // Trade is worth more the better connected the works producing it are — this
+  // is what lets a small, well-joined realm out-earn a sprawling one.
+  get linkBonus(){
+    const { comp } = this.network();
+    let sum = 0, n = 0;
+    for (const b of [B_TOWN, B_HARBOR]){
+      for (const t of this.st[b]){
+        const c = comp.get(t);
+        sum += Math.min(ECON.ROAD_LINK_CAP, (c ? c.size - 1 : 0) * ECON.ROAD_LINK);
+        n++;
+      }
+    }
+    return n ? sum / n : 0;
+  }
+
+  // Ground within reach of a network that has a town on it to feed from.
+  supplied(x, y){
+    const { comp } = this.network();
+    const R2 = ECON.SUPPLY_R * ECON.SUPPLY_R;
+    for (const [t, c] of comp){
+      if (!c.fed) continue;
+      const dx = (t % this.g.W) - x, dy = ((t / this.g.W) | 0) - y;
+      if (dx * dx + dy * dy <= R2) return true;
+    }
+    return false;
+  }
+
   get committed(){ let s = 0; for (const a of this.attacks) s += a.troops; return s; }
   costOf(type){ return Math.round(BUILDS[type].cost * Math.pow(BUILDS[type].step, this.bought[type])); }
 }
@@ -497,6 +573,10 @@ class Attack {
   }
   cost(t){
     const g = this.g;
+    // Ground the attacker cannot supply costs more to take. This is what makes
+    // a castle on a road worth storming: cut the network and the front in
+    // front of it goes hungry.
+    const sup = this.supplyMul();
     const terr = CFG.TERRAIN_DEF[g.terrain[t]];
     const fort = (1 + Math.min(CFG.CASTLE_STACK, g.castleField[t]) * CFG.CASTLE_STEP)
                  * (1 - Math.min(3, g.breachField[t]) * CFG.BREACH_STEP);
@@ -509,15 +589,30 @@ class Attack {
     return (CFG.DEF_BASE + Math.min(CFG.DEF_CAP, g.players[o].density) * CFG.DEF_DENSITY)
            * terr * fort / g.players[this.owner].quality;
   }
+  // Whether this assault is in supply, judged once a tick at the head of the
+  // advance rather than per field — walking the node list for every tile taken
+  // would cost more than the rest of the simulation put together.
+  supplyMul(){ return this._sup || 1; }
+  refreshSupply(){
+    const g = this.g, me = g.players[this.owner];
+    const head = this.heap.peek();
+    if (head < 0){ this._sup = 1; this._inSupply = true; return; }
+    const ok = me.supplied(head % g.W, (head / g.W) | 0);
+    this._inSupply = ok;
+    this._sup = ok ? 1 : ECON.UNSUPPLIED;
+  }
+
   tick(){
     const g = this.g, me = g.players[this.owner];
     if (!me.alive){ this.dead = true; return; }
+    this.refreshSupply();
     // Two separate limits. The levy pool is how much force is available to
     // spend; the tile allowance is how fast a front of that width can actually
     // advance. A huge host funnelled through a narrow border still crawls.
     this.pool = Math.min(this.pool + Math.max(CFG.ATTACK_FLOOR, this.troops * CFG.ATTACK_RATE),
                          this.troops * 0.5 + 400);
-    let allow = Math.max(CFG.TILE_FLOOR, Math.ceil(this.heap.size * CFG.TILE_RATE));
+    let allow = Math.max(CFG.TILE_FLOOR, Math.ceil(this.heap.size * CFG.TILE_RATE
+                          * (this._inSupply ? 1 : ECON.UNSUPPLIED_RATE)));
     let guard = 6000;
     while (allow > 0 && guard-- > 0){
       const t = this.heap.peek();
@@ -754,13 +849,13 @@ class Game {
       const p = this.players[from];
       p.tiles--; p.sumX -= t % this.W; p.sumY -= (t / this.W) | 0;
       p.border.delete(t); p.coast.delete(t);
-      if (b) p.st[b].delete(t);
+      if (b){ p.st[b].delete(t); p.netDirty = true; this.roadDirty = true; }
     }
     this.owner[t] = to;
     if (to >= 0){
       const p = this.players[to];
       p.tiles++; p.sumX += t % this.W; p.sumY += (t / this.W) | 0;
-      if (b) p.st[b].add(t);
+      if (b){ p.st[b].add(t); p.netDirty = true; this.roadDirty = true; }
     }
     this.dirty.push(t);
     const nb = this._nb || (this._nb = new Int32Array(4));
@@ -967,9 +1062,35 @@ class Game {
     const cost = p.costOf(type);
     if (p.ducats < cost) return 'not enough coin';
     p.ducats -= cost; p.bought[type]++;
-    this.build[tile] = type; p.st[type].add(tile);
+    this.build[tile] = type; p.st[type].add(tile); p.netDirty = true; this.roadDirty = true;
     if (type === B_CASTLE) this.stampCastle(tile, 1);
     this.dirty.push(tile); this.buildDirty.push(tile);
+    return null;
+  }
+
+  // Roads join two of your own works. They are the cheapest thing in the game
+  // to build and the most valuable to take, because the whole network hangs on
+  // them: cut one and a province can fall out of supply.
+  roadCost(a, b){
+    const W = this.W;
+    const d = Math.hypot(a % W - b % W, ((a / W) | 0) - ((b / W) | 0));
+    return { d, cost: Math.round(d * ECON.ROAD_PER_FIELD) };
+  }
+
+  layRoad(ownerId, a, b){
+    const p = this.players[ownerId];
+    if (a === b) return 'a road must run between two works';
+    if (!this.build[a] || !this.build[b]) return 'a road runs from one work to another';
+    if (this.owner[a] !== ownerId || this.owner[b] !== ownerId) return 'both ends must be yours';
+    if (p.roads.some(r => (r.a === a && r.b === b) || (r.a === b && r.b === a)))
+      return 'that road is already laid';
+    const { d, cost } = this.roadCost(a, b);
+    if (d > ECON.ROAD_MAX) return 'too far — build a work between them first';
+    if (p.ducats < cost) return `not enough coin (${cost} needed)`;
+    p.ducats -= cost;
+    p.roads.push({ a, b });
+    p.netDirty = true;
+    this.roadDirty = true;
     return null;
   }
 
@@ -977,7 +1098,7 @@ class Game {
     const b = this.build[tile];
     if (!b) return;
     const o = this.owner[tile];
-    if (o >= 0) this.players[o].st[b].delete(tile);
+    if (o >= 0){ this.players[o].st[b].delete(tile); this.players[o].netDirty = true; this.roadDirty = true; }
     if (b === B_CASTLE) this.stampCastle(tile, -1);
     this.build[tile] = 0;
     this.dirty.push(tile); this.buildDirty.push(tile);
@@ -1392,6 +1513,36 @@ class Game {
   // A lord with harbours and coin keeps the sea lanes near them. Without this
   // no AI ever built a galley, so the whole naval game only existed if a human
   // happened to buy one.
+  // A lord joins each new work to the nearest one it already holds, when it can
+  // afford to. Without this the AI would never build a network and the whole
+  // road economy would only exist for human players.
+  botRoads(p){
+    const nodes = p.nodes;
+    if (nodes.length < 2 || p.ducats < 400) return false;
+    const { comp } = p.network();
+    // a work that stands alone, or on a smaller island of the network
+    let lone = -1, loneSize = 1e9;
+    for (const t of nodes){
+      const c = comp.get(t);
+      if (c && c.size < loneSize){ loneSize = c.size; lone = t; }
+    }
+    if (lone < 0 || loneSize > 3) return false;
+    let best = -1, bestD = 1e9;
+    for (const t of nodes){
+      if (t === lone) continue;
+      const c = comp.get(t);
+      if (c && c.size === loneSize && comp.get(lone) && comp.get(lone).size === c.size){
+        // same island — joining them gains nothing
+        const same = p.roads.some(r => (r.a === lone && r.b === t) || (r.a === t && r.b === lone));
+        if (same) continue;
+      }
+      const d = this.roadCost(lone, t).d;
+      if (d < bestD && d <= ECON.ROAD_MAX){ bestD = d; best = t; }
+    }
+    if (best < 0) return false;
+    return this.layRoad(p.id, lone, best) === null;
+  }
+
   botGalley(p){
     if (!p.coast.size || !p.st[B_HARBOR].size) return false;
     if (p.ducats < 1400) return false;
@@ -1450,6 +1601,7 @@ class Game {
     this.botBuild(p);
     this.botMobilise(p);
     this.botGalley(p);
+    this.botRoads(p);
     const ring = this.ringOf(p, 420);
     if (this.botSiege(p, ring)) return;
 
@@ -1574,7 +1726,7 @@ class Game {
 
     // --- ducats ---
     const income = (p.st[B_TOWN].size * ECON.YIELD_TOWN_TRADE
-                  + p.st[B_HARBOR].size * ECON.YIELD_HARBOR_TRADE) * sTrade
+                  + p.st[B_HARBOR].size * ECON.YIELD_HARBOR_TRADE) * sTrade * (1 + p.linkBonus)
                   + p.civ * ECON.TAX_PER_CIV + p.tiles * ECON.DUCAT_PER_TILE;
     let works = 0;
     for (const b of B_ALL) works += p.st[b].size;

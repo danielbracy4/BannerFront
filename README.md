@@ -149,6 +149,29 @@ their own ground.
 ground has to be taken across them; at 65% no match resolved inside 45 minutes
 (0 of 3). At 50% every match resolves, averaging 26 minutes.
 
+## Roads, trade and supply
+
+Works — farms, forges, towns, castles, harbours — are the **nodes** of a network.
+A road is an **edge** you pay for by the field, and it does two things:
+
+**Trade follows connection.** Each town and harbour earns more the larger the
+connected component it sits on (`ROAD_LINK` per extra work, capped at +130%), so
+six joined works are worth far more than six scattered ones. This is the lever
+that lets a small, well-connected realm out-earn a sprawling one.
+
+**Supply follows the network.** Ground within `SUPPLY_R` of a component that
+contains a town is supplied. An assault whose frontier lies beyond supply pays
+`UNSUPPLIED` more per field and advances at `UNSUPPLIED_RATE` of the usual speed
+— measured at a third less ground taken over twenty seconds.
+
+Taking the ground under a work drops every road to it, which can split a network
+in two and starve a whole front. That is what makes storming a castle worth the
+cost, rather than walking around it.
+
+`node tools/roads.js` checks the lot: that joining works raises trade, that
+supply reaches from a town and not beyond it, and that losing a work severs what
+it held together.
+
 ## Balance, and how it got there
 
 Current shape at 40 lords on *Continents*, from `./tools/sim.sh`:

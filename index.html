@@ -276,6 +276,7 @@
     <div class="stat" id="goldrow"><span class="k">Ducats</span><span class="v" id="sgold">0</span></div>
     <div class="stat"><span class="k">Food</span><span class="v" id="sfood">0</span></div>
     <div class="stat"><span class="k">Holdings</span><span class="v" id="stiles">0</span></div>
+    <div class="stat"><span class="k">Roads</span><span class="v" id="snet">—</span></div>
     <div class="stat" id="bldrow" style="margin-top:7px"><span class="k">Works</span><span class="v" id="sbld">—</span></div>
   </aside>
 
@@ -390,7 +391,7 @@ const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
 let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
 let pcol = [];                       // per-lord rgb, precomputed
 let cam = { x: 0, y: 0, z: 3 };
-let mode = 'attack', modeArg = null;
+let mode = 'attack', modeArg = null, roadFrom = -1;
 let hover = -1, hoverTile = -1;
 let speed = 1, running = false;
 const DPR = Math.min(2, window.devicePixelRatio || 1);
@@ -536,6 +537,35 @@ function render(now){
 
   const z = cam.z;
   const vx0 = mxOf(0) - 2, vx1 = mxOf(W) + 2, vy0 = myOf(0) - 2, vy1 = myOf(H) + 2;
+
+  // roads, drawn beneath the works they join
+  if (z > 0.9){
+    c.lineCap = 'round';
+    for (const p of game.players){
+      if (!p.alive || !p.roads.length) continue;
+      c.strokeStyle = p.id === game.humanId ? 'rgba(238,206,140,.85)' : 'rgba(70,54,32,.55)';
+      c.lineWidth = Math.max(1, Math.min(3.5, z * 0.5));
+      c.beginPath();
+      for (const r of p.roads){
+        c.moveTo(sx(r.a % game.W + 0.5), sy(((r.a / game.W) | 0) + 0.5));
+        c.lineTo(sx(r.b % game.W + 0.5), sy(((r.b / game.W) | 0) + 0.5));
+      }
+      c.stroke();
+    }
+  }
+  // the road being laid follows the cursor
+  if (mode === 'road' && roadFrom >= 0 && hoverTile >= 0){
+    c.strokeStyle = 'rgba(255,214,120,.9)'; c.setLineDash([6, 5]); c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(sx(roadFrom % game.W + 0.5), sy(((roadFrom / game.W) | 0) + 0.5));
+    c.lineTo(sx(hoverTile % game.W + 0.5), sy(((hoverTile / game.W) | 0) + 0.5));
+    c.stroke(); c.setLineDash([]);
+    const { d, cost } = game.roadCost(roadFrom, hoverTile);
+    const okLen = d <= ECON.ROAD_MAX;
+    c.font = '12px "Iowan Old Style", Palatino, Georgia, serif';
+    c.fillStyle = okLen ? '#f0e4c4' : '#d9714f';
+    c.fillText(okLen ? `${Math.round(d)} fields · ${cost}c` : 'too far', mouse.x + 14, mouse.y - 8);
+  }
 
   // structures
   if (z > 1.6){
@@ -702,6 +732,7 @@ const ICON = {
   tower: '<path d="M4.5 15V5.6L8 2l3.5 3.6V15z"/><path d="M6.6 8.4h2.8v3H6.6z" fill="#1d1710"/>',
   farm:  '<path d="M1 14.2h14v1.6H1z"/><path d="M2.6 13V7.4L8 3.2l5.4 4.2V13z"/><path d="M6.2 13V9.6h3.6V13z" fill="#1d1710"/>',
   forge: '<path d="M1.6 13.4h12.8v2.2H1.6z"/><path d="M3.8 11.2h8.4l-1.2 2.2H5z"/><path d="M9.4 1.4l4.4 2.4-1 1.8-4.4-2.4z"/><path d="M6.6 4.6h2.2v6.6H6.6z"/>',
+  road:  '<path d="M1.4 15 6 1h4l4.6 14h-3.2L8 3.6 5 15z"/><path d="M7.2 6h1.6v2H7.2zM7.2 9.5h1.6v2H7.2z" fill="#1d1710"/>',
   ram:   '<path d="M1 7.4h10.5v3.2H1z"/><path d="M11.5 6.2h3.4v5.6h-3.4z"/><circle cx="3.6" cy="13.2" r="1.7"/><circle cx="9.4" cy="13.2" r="1.7"/>',
   camp:  '<path d="M4.6 2.8 9.2 13.4H0z"/><path d="M11.2 5.6 16 13.4H6.4z"/>',
   ship:  '<path d="M1 10h14l-2.2 4.4H3.2z"/><path d="M8 1.4 8 9.2M8.6 2.2c2.6.6 4 2 4.4 3.4-2 .3-3.4-.2-4.4-1z"/>',
@@ -721,6 +752,7 @@ const TOOLS = [
   { k:'harbor', cat:'works', kind:'build', arg:B_HARBOR, name:'Harbour',     hint:'trade coin, and ships to launch' },
   { k:'siege',  cat:'works', kind:'build', arg:B_SIEGE,  name:'Siege Works', hint:'lets you loose siege engines' },
   { k:'tower',  cat:'works', kind:'build', arg:B_TOWER,  name:'Watchtower',  hint:'may bring down incoming siege' },
+  { k:'road',   cat:'works', kind:'road',  arg:0,        name:'Road',        hint:'joins two works — trade and supply flow along it' },
   { k:'ship',   cat:'ships', kind:'ship',  arg:400,      name:'Longship',    hint:'carries your levy to a distant shore' },
   { k:'galley', cat:'ships', kind:'galley',arg:1000,     name:'War Galley',  hint:'holds water, sinks what passes' },
   { k:'ram',    cat:'siege', kind:'siege', arg:'ram',    name:'Battering Ram', hint:'breaks a gate — invests the ground close by' },
@@ -736,12 +768,14 @@ const CATS = [
 
 function toolCost(t){
   const me = game.players[game.humanId];
+  if (t.kind === 'road') return ECON.ROAD_PER_FIELD;
   if (t.kind === 'build') return me.costOf(t.arg);
   if (t.kind === 'siege') return SIEGE[t.arg].cost;
   return t.arg;
 }
 function toolReady(t){
   const me = game.players[game.humanId];
+  if (t.kind === 'road') return me.nodes.length >= 2;
   if (me.ducats < toolCost(t)) return false;
   if (t.kind === 'siege' && !me.st[B_SIEGE].size) return false;
   if ((t.kind === 'ship' || t.kind === 'galley') && !me.coast.size) return false;
@@ -791,6 +825,7 @@ function renderRealmTray(){
       <span class="pd">${s.note}</span>
     </div>`).join('');
   $('tray').innerHTML = `<div class="th">Realm — where your people work</div>${rows}
+    <div class="th" style="padding-top:9px">Network — <span id="netline">—</span></div>
     <div class="th" style="padding-top:9px">Army — every soldier is a worker lost</div>
     <div class="prow"><span class="pn">Standing</span>
       <input class="pri" type="range" min="0" max="40" value="${Math.round(me.standing * 100)}" data-a="standing">
@@ -824,6 +859,14 @@ function realmReadouts(){
           ? ` <span style="color:${staffed > 0.95 ? '#8fae62' : '#a89566'}">${fmt(me.jobs[s.k] || 0)} of ${fmt(cap[s.k])}</span>`
           : ` <span class="warn">no works</span>`);
   }
+  const nl = $('tray').querySelector('#netline');
+  if (nl){
+    const bonus = me.linkBonus, roads = me.roads.length, works = me.nodes.length;
+    nl.innerHTML = works < 2
+      ? 'raise two works, then join them with a road'
+      : `${roads} road${roads === 1 ? '' : 's'} joining ${works} works · `
+        + `<span style="color:${bonus > 0 ? '#8fae62' : '#a89566'}">+${(bonus * 100).toFixed(0)}% trade</span>`;
+  }
   for (const a of ['standing', 'mobil']){
     const el = $('tray').querySelector(`[data-sv="${a}"]`);
     if (el) el.textContent = Math.round(me[a] * 100) + '%';
@@ -845,10 +888,14 @@ function refreshTools(){
   if (armed){
     const what = mode === 'build'  ? 'Placing a ' + BUILDS[modeArg].name
                : mode === 'siege'  ? 'Laying a ' + SIEGE[modeArg].name.toLowerCase()
-               : mode === 'ship'   ? 'Launching a longship' : 'Sending a war galley';
+               : mode === 'ship'   ? 'Launching a longship'
+               : mode === 'road'   ? (roadFrom < 0 ? 'Laying a road' : 'Laying a road — choose the far end')
+               : 'Sending a war galley';
     const where = mode === 'build' ? 'click your own ground'
                 : mode === 'siege' ? 'click the ground to invest'
-                : mode === 'ship'  ? 'click the shore to land on' : 'click open water';
+                : mode === 'ship'  ? 'click the shore to land on'
+                : mode === 'road'  ? 'click one of your works, then another'
+                : 'click open water';
     $('armedTxt').innerHTML = `<b>${what}</b> — ${where}`;
   }
   if (openCat && openCat !== 'realm'){
@@ -858,6 +905,7 @@ function refreshTools(){
   }
 }
 function setMode(m, arg){
+  if (m !== 'road') roadFrom = -1;
   mode = m; modeArg = arg === undefined ? null : arg;
   cv.style.cursor = m === 'attack' ? 'crosshair' : 'copy';
   if (m !== 'attack') showTray(null);
@@ -902,6 +950,30 @@ function actAttack(t){
   if (o >= 0) toast(`You march on <b>${game.players[o].name}</b>.`, 'war');
   return true;
 }
+// Two clicks: the work you start from, then the one you join it to.
+function actRoad(t){
+  const me = game.players[game.humanId];
+  if (game.owner[t] !== me.id || !game.build[t]){
+    toast('A road runs from one of your works to another.');
+    return false;
+  }
+  if (roadFrom < 0){
+    roadFrom = t;
+    toast(`From ${BUILDS[game.build[t]].name} — now choose the work to join it to.`);
+    return true;
+  }
+  if (roadFrom === t){ roadFrom = -1; return false; }
+  const { d, cost } = game.roadCost(roadFrom, t);
+  if (NET.online){ NET.send({ do:'road', a: roadFrom, b: t }); }
+  else {
+    const err = game.layRoad(me.id, roadFrom, t);
+    if (err){ toast(err); roadFrom = -1; return false; }
+    toast(`Road laid — ${Math.round(d)} fields, ${cost} ducats.`, 'good');
+  }
+  roadFrom = -1;
+  return true;
+}
+
 function actBuild(t, type){
   if (NET.online){ NET.send({ do:'build', tile:t, type }); return true; }
   const err = game.place(game.humanId, t, type);
@@ -992,6 +1064,7 @@ function onClick(px, py){
     return;
   }
   if (game.phase !== 'war') return;
+  if (mode === 'road'){ actRoad(t); return; }
   if (mode === 'build'){ if (actBuild(t, modeArg)) setMode('attack'); return; }
   if (mode === 'siege'){ if (actSiege(t, modeArg)) setMode('attack'); return; }
   if (mode === 'ship'){  if (actShip(t))            setMode('attack'); return; }
@@ -1136,6 +1209,10 @@ function updateHUD(){
     ? `<span class="warn">starving ${(me.food || 0).toFixed(1)}/s</span>`
     : `+${(me.food || 0).toFixed(1)}/s`;
   $('stiles').textContent = fmt(me.tiles) + ` · ${(me.tiles / game.landCount * 100).toFixed(1)}%`;
+  const link = me.linkBonus;
+  $('snet').innerHTML = me.nodes.length < 2 ? '—'
+    : `${me.roads.length} road${me.roads.length === 1 ? '' : 's'}`
+      + (link > 0 ? ` <span style="color:#8fae62">+${(link * 100).toFixed(0)}% trade</span>` : '');
   const parts = [];
   for (const b of B_ALL) if (me.st[b].size) parts.push(me.st[b].size + '× ' + BUILDS[b].name);
   $('sbld').textContent = parts.length ? parts.join(', ') : '—';
@@ -1373,6 +1450,13 @@ function onServerState(m){
     else for (let i = 0; i < m.owners.length; i += 2) game.setOwner(m.owners[i], m.owners[i + 1]);
   }
   if (m.builds) for (let i = 0; i < m.builds.length; i += 2) applyBuild(m.builds[i], m.builds[i + 1]);
+  if (m.roads){
+    for (const p of game.players){ p.roads = []; p.netDirty = true; }
+    for (let i = 0; i < m.roads.length; i += 3){
+      const p = game.players[m.roads[i]];
+      if (p) p.roads.push({ a: m.roads[i + 1], b: m.roads[i + 2] });
+    }
+  }
   for (const row of m.lords || []){
     const p = game.players[row[0]];
     if (!p) continue;
@@ -1409,9 +1493,17 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 
 const CHANGELOG = [
+  { v:'0.10.0', when:'roads', notes:[
+    '<b>Roads</b>. Join two of your works with a road and trade rises — the better connected your network, the more each town and harbour earns, up to +130%. This is what lets a small, well-joined realm out-earn a sprawling one.',
+    '<b>Supply.</b> Ground within reach of a network that has a town on it is supplied. An advance beyond supply pays more for every field and creeps at half speed — over twenty seconds it takes a third less ground.',
+    'Cut the network and the front in front of it goes hungry: take the ground under a work and every road to it is dropped, splitting what it held together. <b>That is what makes storming a castle worth doing.</b>',
+    'Pick <b>Road</b> from Works, click one of your works, then another. The cost follows the distance.',
+    'Lords lay roads of their own now.',
+    'Fixed: starting a solo match while an online one was still connected let the server keep overwriting your local game.',
+  ]},
   { v:'0.9.0', when:'Europe', notes:[
     'The map is <b>Europe in 1300</b> — real coastlines, the Alps, Pyrenees, Carpathians, Apennines and the Scandinavian Keel, drawn from geography rather than noise.',
     'Your rivals are the <b>powers of the age</b>: France, England, Castile, Aragon, Venice, the Byzantine Empire, the Golden Horde, the Teutonic Order, Novgorod, the Ottoman Beylik and thirty more — each seated at its historical capital.',
@@ -1572,6 +1664,13 @@ let onlineLobby = false;
 // Solo: the countdown and roster are ours. Online: the server owns both, and
 // everything below just renders what it tells us.
 function openLobby(solo){
+  // A socket left open from a previous online match keeps streaming server
+  // state into whatever game object exists — which silently wipes a solo game
+  // as fast as it is set up. Hang up first.
+  if (solo && NET.sock){
+    try { NET.sock.close(); } catch(e){}
+    NET.sock = null; NET.online = false; NET.myLord = -1; NET.seated = false;
+  }
   onlineLobby = !solo;
   $('start').style.display = 'none';
   $('lobby').style.display = 'flex';

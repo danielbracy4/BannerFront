@@ -243,6 +243,14 @@ class Room {
       g.buildDirty.length = 0;
     }
 
+    // the road network, whenever it changes — it is small and rarely moves
+    let roads = null;
+    if (full || g.roadDirty){
+      roads = [];
+      for (const pl of g.players) for (const r of pl.roads) roads.push(pl.id, r.a, r.b);
+      g.roadDirty = false;
+    }
+
     // rates too — without them the client's panel reads a flat 0.0/s and the
     // player cannot see whether their realm is feeding itself or starving
     const lords = g.players.map(p => [
@@ -257,7 +265,7 @@ class Room {
 
     this.io.to(this.id).emit('state', {
       t: +g.time.toFixed(1),
-      full, owners, builds, lords,
+      full, owners, builds, lords, roads,
       alive: g.aliveCount, leader: g.leader,
       boats: g.boats.map(b => [b.owner, +b.x.toFixed(1), +b.y.toFixed(1), b.kind]),
       sieges: g.sieges.map(s => [s.owner, s.tile, s.kind, +(s.t / s.dur).toFixed(2)]),
@@ -350,6 +358,13 @@ class Room {
       case 'break': {
         const id = +msg.id;
         if (me.allies.has(id)) g.breakAlly(me.id, id, true);
+        return;
+      }
+      case 'road': {
+        const a = Number.isInteger(msg.a) && msg.a >= 0 && msg.a < g.N ? msg.a : -1;
+        const b = Number.isInteger(msg.b) && msg.b >= 0 && msg.b < g.N ? msg.b : -1;
+        if (a < 0 || b < 0) return;
+        this.nope(socketId, g.layRoad(me.id, a, b));
         return;
       }
       case 'realm': {
