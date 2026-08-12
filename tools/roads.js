@@ -16,12 +16,15 @@ for (let k = 0; k < 6; k++){ g.launch(0, -1, p.sold * 0.9); for (let i = 0; i < 
 p.ducats = 200000; p.bought = {1:0,2:0,3:0,4:0,5:0,6:0,7:0};
 
 const W = g.W, far = (a, b) => Math.hypot(a % W - b % W, ((a / W) | 0) - ((b / W) | 0));
-const spots = [...p.border].filter(t => !g.build[t]);
+// works need a square of our own ground now, so a border field rarely serves
+const spots = [];
+for (let t = 0; t < g.N; t++) if (g.owner[t] === 0 && !g.canPlace(0, t, 1)) spots.push(t);
 
 console.log('\n  BANNERFRONT — roads\n');
 
 const a = spots[0];
 const b = spots.reduce((best, t) => far(a, t) > far(a, best) ? t : best, spots[1]);
+check(spots.length > 2, `${spots.length} sites have room for a 3\u00d73 town`);
 check(g.place(0, a, 1) === null, 'a town is raised');
 p.netDirty = true; p.network();
 check(p.roads.length === 0, 'one work alone has no roads');
@@ -34,7 +37,7 @@ check(Math.round(p.ducats) === Math.round(coin - p.costOf(1) * 0 - (coin - p.duc
 const bonus1 = p.linkBonus;
 check(bonus1 > 0, `trade rises with the network (+${(bonus1 * 100).toFixed(0)}%)`);
 
-const d3 = spots.find(t => t !== a && t !== b && far(a, t) > 6 && far(a, t) < 40 && !g.build[t]);
+const d3 = spots.find(t => far(a, t) > 6 && far(b, t) > 6 && far(a, t) < 40 && !g.canPlace(0, t, 6));
 if (d3 && g.place(0, d3, 6) === null){
   p.netDirty = true; p.network();
   check(p.roads.length === 2, 'a third work joins the same network');

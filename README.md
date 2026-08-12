@@ -149,6 +149,17 @@ their own ground.
 ground has to be taken across them; at 65% no match resolved inside 45 minutes
 (0 of 3). At 50% every match resolves, averaging 26 minutes.
 
+## Ground
+
+Works occupy a square of your own land — **3×3** for a Town, Castle or Farm,
+**2×2** for a Harbour, Blacksmith, Siege Works or Watchtower — validated over
+every field of the footprint before anything is built. Land is therefore the
+real constraint on an economy: a small island cannot hold everything a realm
+needs, and *where* you build is a decision rather than a formality.
+
+`game.site` maps every occupied field back to the work standing on it, so
+overlap is impossible and razing frees the whole square.
+
 ## Roads, trade and supply
 
 Works — farms, forges, towns, castles, harbours — are the **nodes** of a network,

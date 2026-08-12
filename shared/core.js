@@ -77,13 +77,16 @@ const B_NONE = 0, B_TOWN = 1, B_CASTLE = 2, B_HARBOR = 3, B_SIEGE = 4, B_TOWER =
 const B_ALL = [B_TOWN, B_CASTLE, B_HARBOR, B_SIEGE, B_TOWER, B_FARM, B_FORGE];
 
 const BUILDS = {
-  [B_TOWN]:   { key:'town',   name:'Town',       cost:620,  step:1.18, needCoast:false },
-  [B_CASTLE]: { key:'castle', name:'Castle',     cost:700,  step:1.12, needCoast:false },
-  [B_HARBOR]: { key:'harbor', name:'Harbour',    cost:650,  step:1.15, needCoast:true  },
-  [B_SIEGE]:  { key:'siege',  name:'Siege Works',cost:2400, step:1.30, needCoast:false },
-  [B_TOWER]:  { key:'tower',  name:'Watchtower', cost:1300, step:1.20, needCoast:false },
-  [B_FARM]:   { key:'farm',   name:'Farm',       cost:340,  step:1.10, needCoast:false },
-  [B_FORGE]:  { key:'forge',  name:'Blacksmith', cost:560,  step:1.14, needCoast:false },
+  // `size` is the square of ground a work stands on. Land is the real
+  // constraint on an economy — without a footprint you could fit an entire
+  // realm's industry onto a ten-field island.
+  [B_TOWN]:   { key:'town',   name:'Town',       cost:620,  step:1.18, needCoast:false, size:3 },
+  [B_CASTLE]: { key:'castle', name:'Castle',     cost:700,  step:1.12, needCoast:false, size:3 },
+  [B_HARBOR]: { key:'harbor', name:'Harbour',    cost:650,  step:1.15, needCoast:true,  size:2 },
+  [B_SIEGE]:  { key:'siege',  name:'Siege Works',cost:2400, step:1.30, needCoast:false, size:2 },
+  [B_TOWER]:  { key:'tower',  name:'Watchtower', cost:1300, step:1.20, needCoast:false, size:2 },
+  [B_FARM]:   { key:'farm',   name:'Farm',       cost:340,  step:1.10, needCoast:false, size:3 },
+  [B_FORGE]:  { key:'forge',  name:'Blacksmith', cost:560,  step:1.14, needCoast:false, size:2 },
 };
 
 // ------------------------------------------------------------------- economy
@@ -705,6 +708,7 @@ class Game {
     this.build   = new Uint8Array(this.N);
     this.elev    = new Uint8Array(this.N);
     this.castleField = new Uint8Array(this.N);
+    this.site = new Int32Array(this.N).fill(-1);   // tile -> the work standing on it
     this.breachField = new Uint8Array(this.N);
     this._bfs = new Int32Array(this.N);    // BFS parent, reused
     this._bfsStamp = new Int32Array(this.N);
@@ -1083,14 +1087,40 @@ class Game {
   }
 
   // -------------------------------------------------------------- buildings
+  // The square of ground a work would stand on, anchored at the clicked field.
+  // Returns null if any of it runs off the map.
+  footprint(tile, size){
+    const W = this.W, x = tile % W, y = (tile / W) | 0;
+    if (x + size > W || y + size > this.H) return null;
+    const out = [];
+    for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) out.push((y + j) * W + x + i);
+    return out;
+  }
+
+  // Is this field clear to build on — land, and nothing already standing?
+  clear(tile){ return this.isLand(tile) && this.site[tile] < 0; }
+
+  canPlace(ownerId, tile, type){
+    const p = this.players[ownerId], B = BUILDS[type];
+    const cells = this.footprint(tile, B.size);
+    if (!cells) return 'there is not room for it there';
+    for (const t of cells){
+      if (this.owner[t] !== ownerId) return `a ${B.name.toLowerCase()} needs ${B.size}×${B.size} of your own ground`;
+      if (!this.isLand(t)) return 'it cannot be built on water';
+      if (this.site[t] >= 0) return 'something already stands there';
+    }
+    if (B.needCoast && !cells.some(t => p.coast.has(t))) return 'a harbour must sit on the shore';
+    if (p.ducats < p.costOf(type)) return 'not enough coin';
+    return null;
+  }
+
   place(ownerId, tile, type){
-    const p = this.players[ownerId];
-    if (this.owner[tile] !== ownerId) return 'that ground is not yours';
-    if (this.build[tile]) return 'something already stands there';
-    if (BUILDS[type].needCoast && !p.coast.has(tile)) return 'a harbour must sit on the shore';
-    const cost = p.costOf(type);
-    if (p.ducats < cost) return 'not enough coin';
-    p.ducats -= cost; p.bought[type]++;
+    const err = this.canPlace(ownerId, tile, type);
+    if (err) return err;
+    const p = this.players[ownerId], B = BUILDS[type];
+    const cells = this.footprint(tile, B.size);
+    p.ducats -= p.costOf(type); p.bought[type]++;
+    for (const t of cells){ this.site[t] = tile; this.dirty.push(t); }
     this.build[tile] = type; p.st[type].add(tile); p.netDirty = true; this.roadDirty = true;
     if (type === B_CASTLE) this.stampCastle(tile, 1);
     this.dirty.push(tile); this.buildDirty.push(tile);
@@ -1103,6 +1133,8 @@ class Game {
     const o = this.owner[tile];
     if (o >= 0){ this.players[o].st[b].delete(tile); this.players[o].netDirty = true; this.roadDirty = true; }
     if (b === B_CASTLE) this.stampCastle(tile, -1);
+    const cells = this.footprint(tile, BUILDS[b].size) || [tile];
+    for (const t of cells){ if (this.site[t] === tile){ this.site[t] = -1; this.dirty.push(t); } }
     this.build[tile] = 0;
     this.dirty.push(tile); this.buildDirty.push(tile);
   }
@@ -1490,11 +1522,11 @@ class Game {
         const y = Math.round(p.cy + (this.rand() - 0.5) * spread * 2);
         if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
         const t = y * this.W + x;
-        if (this.owner[t] === p.id && !this.build[t]) return t;
+        if (this.owner[t] === p.id && this.clear(t)) return t;
       }
       return -1;
     };
-    const fromSet = set => { const t = pickFrom(set, this.rand); return (t >= 0 && !this.build[t]) ? t : -1; };
+    const fromSet = set => { const t = pickFrom(set, this.rand); return (t >= 0 && this.clear(t)) ? t : -1; };
     const put = (type, get) => {
       if (p.ducats < p.costOf(type)) return false;
       const t = get(); if (t < 0) return false;
@@ -1545,7 +1577,7 @@ class Game {
     for (let k = 0; k < 60; k++){
       const t = pickFrom(p.border, this.rand);
       if (t < 0) break;
-      if (this.build[t]) continue;
+      if (!this.clear(t)) continue;
       let facing = 0;
       const n = this.neighbors(t, nb);
       for (let i = 0; i < n; i++) if (this.owner[nb[i]] === target) facing++;

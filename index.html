@@ -575,10 +575,14 @@ function render(now){
       if (!p.alive) continue;
       const col = '#efe3c4';
       for (const type of B_ALL){
+        const sz = BUILDS[type].size;
         for (const t of p.st[type]){
           const x = t % game.W, y = (t / game.W) | 0;
           if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
-          symbol(c, type, sx(x + 0.5), sy(y + 0.5), s, col);
+          // the ground it stands on, then the mark in the middle of it
+          c.fillStyle = 'rgba(28,20,10,.20)';
+          c.fillRect(sx(x), sy(y), sz * z, sz * z);
+          symbol(c, type, sx(x + sz / 2), sy(y + sz / 2), s * (sz > 2 ? 1.25 : 1), col);
         }
       }
     }
@@ -654,12 +658,23 @@ function render(now){
   }
   // build ghost
   if (mode.startsWith('build') && hoverTile >= 0){
-    const type = modeArg, x = (hoverTile % game.W) + 0.5, y = ((hoverTile / game.W) | 0) + 0.5;
-    const ok = game.owner[hoverTile] === game.humanId && !game.build[hoverTile] &&
-               (!BUILDS[type].needCoast || me.coast.has(hoverTile));
-    c.globalAlpha = 0.85;
-    symbol(c, type, sx(x), sy(y), Math.max(4, z * 1.6), ok ? '#bfe89a' : '#e08b7a');
+    const type = modeArg, sz = BUILDS[type].size;
+    const x = hoverTile % game.W, y = (hoverTile / game.W) | 0;
+    const why = game.canPlace(game.humanId, hoverTile, type);
+    const ok = !why;
+    c.fillStyle = ok ? 'rgba(150,220,120,.28)' : 'rgba(220,120,90,.28)';
+    c.fillRect(sx(x), sy(y), sz * z, sz * z);
+    c.strokeStyle = ok ? 'rgba(180,240,150,.9)' : 'rgba(230,140,110,.9)';
+    c.lineWidth = 1.5;
+    c.strokeRect(sx(x), sy(y), sz * z, sz * z);
+    c.globalAlpha = 0.9;
+    symbol(c, type, sx(x + sz / 2), sy(y + sz / 2), Math.max(4, z * 1.6), ok ? '#bfe89a' : '#e08b7a');
     c.globalAlpha = 1;
+    if (why){
+      c.font = '12px "Iowan Old Style", Palatino, Georgia, serif';
+      c.fillStyle = '#e8a48c';
+      c.fillText(why, mouse.x + 14, mouse.y - 8);
+    }
   }
   if (mode === 'siege' && hoverTile >= 0){
     const S = SIEGE[modeArg];
@@ -875,7 +890,8 @@ function renderTray(){
   const cat = CATS.find(x => x.id === openCat);
   const rows = TOOLS.map((t, i) => ({ t, i })).filter(o => o.t.cat === openCat).map(({ t, i }) =>
     `<button class="item ${toolReady(t) ? '' : 'off'}" data-i="${i}">${svg(t.k)}
-      <span class="nm">${t.name}</span><span class="ds">${t.hint}</span>
+      <span class="nm">${t.name}</span><span class="ds">${t.hint}${
+        t.kind === 'build' ? ` <span style="color:#7f6c46">· ${BUILDS[t.arg].size}×${BUILDS[t.arg].size} of ground</span>` : ''}</span>
       <span class="cs">${toolCost(t)}c</span></button>`).join('');
   $('tray').innerHTML = `<div class="th">${cat.name} — ${cat.sub}</div>${rows}`;
 }
@@ -1062,10 +1078,11 @@ function openCtx(px, py){
   } else if (o === me.id){
     title = 'Your ground'; sub = 'raise a work here';
     for (const type of B_ALL){
-      const cost = me.costOf(type);
-      const ok = me.ducats >= cost && !game.build[t] &&
-                 (!BUILDS[type].needCoast || me.coast.has(t));
-      rows.push(mi('build:' + type, BUILDS[type].key, 'Raise a ' + BUILDS[type].name, cost, ok));
+      const B = BUILDS[type];
+      const ok = !game.canPlace(me.id, t, type);
+      rows.push(mi('build:' + type, B.key,
+                   `Raise a ${B.name} <span style="color:#7f6c46">${B.size}×${B.size}</span>`,
+                   me.costOf(type), ok));
     }
   } else if (o < 0){
     title = 'Open ground'; sub = 'unclaimed by any banner';
@@ -1463,9 +1480,15 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 
 const CHANGELOG = [
+  { v:'0.12.0', when:'ground', notes:[
+    '<b>Works take up room.</b> A Town, Castle or Farm needs <b>3×3</b> of your own ground; a Harbour, Blacksmith, Siege Works or Watchtower needs <b>2×2</b>.',
+    'You can no longer cram an entire economy onto a ten-field island. Land is the real constraint now, and where you build is a decision rather than a formality.',
+    'The build ghost shows the whole square before you commit, green where it fits and red where it does not, with the reason beside the cursor.',
+    'The orders menu greys out anything that will not fit, and lists the ground each work needs.',
+  ]},
   { v:'0.11.0', when:'roads and caravans', notes:[
     '<b>Roads build themselves.</b> Raise two works within reach of each other and a road appears between them — no cost, nothing to click. Your decision is <i>where to build</i>; the network follows.',
     '<b>Caravans</b> run those roads on their own, carrying goods between works and paying out when they arrive.',
@@ -1581,6 +1604,7 @@ still. Men committed to an attack are not defending your own borders, so a big s
 <p>Attacking open ground gets more expensive the more you already hold — a realm can only reach so far.</p>
 
 <h4>What to build</h4>
+<p><b>Works take up ground.</b> A town, castle or farm needs a 3×3 square of your own land; a harbour, blacksmith, siege works or watchtower needs 2×2. You cannot fit a whole economy onto a small island — where you build matters.</p>
 <div class="row2"><div class="lhs">Farm</div><div class="rhs">food. Without it your population stops growing and then falls.</div></div>
 <div class="row2"><div class="lhs">Blacksmith</div><div class="rhs">arms. Nothing else makes them.</div></div>
 <div class="row2"><div class="lhs">Town</div><div class="rhs">trade jobs, tax and construction labour — the hub of an economy.</div></div>
