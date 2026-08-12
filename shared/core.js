@@ -59,6 +59,9 @@ const CFG = {
                            // is also why it cannot stack far, or a ring of
                            // castles makes a realm simply untakeable.
   CASTLE_R:       8,
+  HUNT_R:         26,      // how far a galley will chase a rival's ship
+  PATROL_R:       3.5,     // the circuit it walks when the sea is empty
+  PRIZE:          260,     // ducats plundered from a captured trader
   SIEGE_REACH:    7,       // how far from your own frontier a siege may be laid
   BREACH_STEP:    0.13,    // ground under siege is this much cheaper, per tier
   SIEGE_BLEED:    0.015,   // garrison lost per second, per invested field
@@ -254,6 +257,138 @@ const PALETTE = (() => {
   }
   return out;
 })();
+// ---------------------------------------------------------------- Europe map
+// Real geography, as coastline polygons and mountain spines in degrees. Point
+// sampling per tile, with the sample point warped by noise first so coasts come
+// out ragged rather than showing the straight edges of the polygons.
+const EU = {
+  lon0: -12, lon1: 42, lat0: 34.0, lat1: 71.5,
+  land: [
+    // Iberia
+    [[-9.5,43.8],[-4.5,43.6],[-1.8,43.4],[0.9,41.2],[3.3,41.9],[0.7,40.6],[-0.3,39.4],[-0.9,37.6],
+     [-2.2,36.7],[-5.6,36.0],[-7.4,37.2],[-9.3,38.4],[-9.6,39.4],[-8.9,41.9]],
+    // the Pyrenean march — same gap the Alps had, between Iberia and France
+    [[-1.95,43.5],[0.9,42.95],[3.3,42.5],[3.25,41.8],[0.75,41.1],[-1.85,43.2]],
+    // France, the Low Countries and the Rhine
+    [[-4.8,48.4],[-1.5,49.7],[1.6,51.0],[4.3,51.6],[6.0,52.0],[6.2,50.5],[7.6,49.0],[7.6,47.6],
+     [6.0,46.2],[7.0,44.0],[5.5,43.2],[3.0,43.0],[0.9,42.8],[-1.8,43.4],[-1.2,45.8],[-2.2,47.2]],
+    // Germany, Poland, Bohemia, Austria, Hungary
+    [[6.0,52.0],[7.0,53.6],[8.5,54.9],[10.0,54.4],[12.0,54.5],[14.3,54.0],[16.5,54.6],[19.0,54.4],
+     [21.0,54.4],[23.5,54.0],[23.9,52.1],[24.2,50.6],[23.3,49.3],[22.6,48.5],[22.9,47.9],[21.5,46.2],
+     [19.6,45.9],[17.0,45.8],[16.0,46.5],[13.7,46.5],[12.4,46.6],[11.0,47.0],[9.6,47.5],[7.6,47.6],
+     [7.6,49.0],[6.2,50.5]],
+    // Ruthenia and the western Rus
+    [[23.5,54.0],[26.0,55.8],[28.2,57.2],[30.5,59.2],[33.0,59.8],[36.0,59.0],[40.0,57.6],[42.0,55.0],
+     [42.0,50.0],[40.0,48.0],[38.0,47.2],[36.0,46.5],[33.5,46.2],[32.0,46.6],[30.5,46.0],[28.5,45.4],
+     [28.8,47.0],[26.6,48.3],[24.0,50.5],[23.9,52.1]],
+    // the Balkans and Greece
+    [[16.0,46.5],[19.6,45.9],[21.5,46.2],[22.9,47.9],[25.0,45.5],[27.5,44.2],[28.6,43.7],[27.5,42.1],
+     [26.5,41.3],[24.0,40.6],[23.5,40.2],[23.0,39.0],[23.7,38.0],[23.0,36.4],[22.0,37.0],[21.3,37.7],
+     [20.9,39.0],[19.4,40.3],[19.0,41.8],[18.0,42.7],[16.5,43.4],[15.2,44.3],[13.6,45.5]],
+    // the Alpine arc — bridges the gap between the German lands and Italy
+    [[5.9,46.3],[7.5,47.6],[10.0,47.7],[13.6,46.9],[13.4,45.6],[11.0,45.7],[8.0,45.0],[6.4,45.1]],
+    // Italy
+    [[7.6,44.1],[9.2,45.5],[11.0,45.6],[12.4,45.5],[13.6,44.9],[14.2,42.6],[15.2,41.9],[16.5,41.9],
+     [18.0,40.7],[18.5,40.1],[17.9,39.9],[16.9,39.5],[17.1,38.9],[16.0,37.9],[15.6,38.2],[15.8,40.0],
+     [14.0,40.8],[13.0,41.2],[11.2,42.4],[10.5,43.0],[9.8,44.0],[8.8,44.4]],
+    // Great Britain
+    [[-5.0,58.6],[-3.0,58.6],[-2.0,57.5],[-1.8,56.0],[-1.5,54.5],[0.3,53.5],[1.7,52.7],[1.0,51.4],
+     [0.5,50.8],[-2.0,50.6],[-4.2,50.3],[-5.7,50.1],[-4.5,51.6],[-3.0,51.5],[-3.0,53.3],[-4.8,53.4],
+     [-4.0,54.9],[-5.0,55.9],[-5.6,57.0]],
+    // Ireland
+    [[-10.0,54.3],[-8.0,55.3],[-6.0,55.2],[-5.9,54.0],[-6.2,52.2],[-8.0,51.5],[-9.9,51.6],[-10.3,53.4]],
+    // Norway and Sweden
+    [[4.5,58.1],[5.5,60.5],[7.5,63.0],[11.0,64.5],[14.0,66.5],[18.0,68.5],[21.0,70.0],[25.0,71.1],
+     [28.0,70.5],[30.5,69.7],[27.0,68.5],[24.0,66.0],[21.5,64.0],[19.2,63.0],[18.3,61.0],[19.4,59.6],[17.2,58.4],
+     [16.6,57.0],[14.5,55.4],[12.6,56.2],[11.5,58.5],[8.0,58.2]],
+    // Finland and Karelia
+    [[21.5,64.0],[24.0,65.8],[27.0,68.0],[29.5,69.5],[31.0,68.0],[30.0,66.0],[31.5,64.0],[31.0,62.0],
+     [28.0,60.5],[25.0,60.0],[22.5,60.3],[21.0,62.0]],
+    // Jutland
+    [[8.1,54.9],[8.0,57.1],[10.6,57.7],[10.8,56.0],[9.9,54.8]],
+    // Anatolia
+    [[26.0,40.2],[29.0,41.2],[33.0,42.0],[36.0,41.7],[40.0,41.5],[42.0,41.4],[42.0,37.5],[40.0,37.0],
+     [36.0,36.0],[32.5,36.2],[30.0,36.3],[28.0,36.7],[26.3,38.4]],
+    // the Maghreb coast
+    [[-6.0,35.9],[-2.0,35.5],[3.0,36.9],[8.0,37.1],[11.0,37.2],[11.5,33.4],[5.0,34.0],[-2.0,33.8],[-6.0,33.6]],
+    // Crimea
+    [[33.5,46.2],[36.6,45.4],[35.4,44.4],[33.4,44.4],[32.5,45.3]],
+    // islands
+    [[12.4,38.1],[15.6,38.3],[15.1,36.7],[12.4,37.8]],                     // Sicily
+    [[8.2,41.3],[9.8,41.2],[9.6,38.9],[8.4,39.0]],                         // Sardinia
+    [[8.6,43.0],[9.5,42.7],[9.4,41.4],[8.6,42.0]],                         // Corsica
+    [[23.5,35.6],[26.3,35.3],[26.0,34.9],[23.5,35.2]],                     // Crete
+    [[32.3,35.2],[34.6,35.7],[34.0,34.6],[32.5,34.6]],                     // Cyprus
+  ],
+  // mountain spines: polyline in degrees, plus how wide the range runs
+  ranges: [
+    { r:1.0, pts:[[6.0,45.9],[8.0,46.4],[11.0,47.0],[13.5,47.0]] },        // Alps
+    { r:0.5, pts:[[-1.6,43.0],[1.5,42.6],[3.2,42.4]] },                    // Pyrenees
+    { r:0.8, pts:[[18.9,49.3],[22.5,49.0],[25.5,47.5],[24.5,45.4]] },      // Carpathians
+    { r:0.6, pts:[[10.0,44.2],[13.0,42.5],[15.5,41.0],[16.4,39.6]] },      // Apennines
+    { r:1.3, pts:[[6.5,60.0],[10.0,63.0],[15.0,66.5],[20.0,68.5]] },       // the Keel
+    { r:0.8, pts:[[14.5,45.5],[18.0,43.5],[20.5,42.0],[22.0,41.5]] },      // Dinarics
+    { r:0.5, pts:[[23.0,42.8],[26.5,42.8]] },                              // Stara Planina
+    { r:0.9, pts:[[29.5,37.2],[33.0,37.0],[37.0,37.8],[41.0,38.6]] },      // Taurus
+    { r:0.5, pts:[[-6.5,43.1],[-3.0,43.1]] },                              // Cantabrians
+    { r:0.30, pts:[[-5.4,41.0],[-2.9,41.4]] },                             // Sistema Central
+    { r:0.5, pts:[[-3.5,37.2],[-1.9,37.5]] },                              // Sierra Nevada
+    { r:0.6, pts:[[2.0,45.2],[3.5,44.8]] },                                // Massif Central
+    { r:0.5, pts:[[12.5,49.6],[15.5,49.9]] },                              // Bohemian rim
+  ],
+};
+
+function inPoly(px, py, poly){
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+function segDist(px, py, ax, ay, bx, by){
+  const dx = bx - ax, dy = by - ay;
+  const L = dx * dx + dy * dy;
+  let t = L ? ((px - ax) * dx + (py - ay) * dy) / L : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+const EU_BOX = EU.land.map(poly => {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const [x, y] of poly){ if (x<x0)x0=x; if (x>x1)x1=x; if (y<y0)y0=y; if (y>y1)y1=y; }
+  return [x0, y0, x1, y1];
+});
+
+
+// The powers of Latin Christendom and its neighbours around 1300, each with the
+// seat of its power. Bots are placed at home; players choose their own ground.
+const POWERS = [
+  ['Kingdom of France',        2.3, 48.9], ['Kingdom of England',      -0.1, 51.5],
+  ['Crown of Castile',        -3.7, 40.4], ['Crown of Aragon',          2.2, 41.4],
+  ['Kingdom of Portugal',     -9.1, 38.7], ['Kingdom of Navarre',      -1.6, 42.8],
+  ['Emirate of Granada',      -3.6, 37.2], ['Kingdom of Scotland',     -3.2, 55.9],
+  ['Lordship of Ireland',     -6.3, 53.3], ['Duchy of Brittany',       -1.7, 48.1],
+  ['Duchy of Burgundy',        5.0, 47.3], ['County of Flanders',       3.2, 51.2],
+  ['County of Savoy',          6.1, 45.6], ['Swiss Confederacy',        8.2, 46.9],
+  ['Duchy of Bavaria',        11.6, 48.1], ['Duchy of Austria',        16.4, 48.2],
+  ['Duchy of Saxony',         11.6, 51.3], ['Kingdom of Bohemia',      14.4, 50.1],
+  ['Archbishopric of Mainz',   8.3, 50.0], ['County of Holland',        4.9, 52.4],
+  ['Republic of Venice',      12.3, 45.4], ['Republic of Genoa',        8.9, 44.4],
+  ['Republic of Florence',    11.3, 43.8], ['Duchy of Milan',           9.2, 45.5],
+  ['Papal States',            12.5, 41.9], ['Kingdom of Naples',       14.3, 40.8],
+  ['Kingdom of Sicily',       13.4, 38.1], ['Kingdom of Hungary',      19.0, 47.5],
+  ['Kingdom of Poland',       19.9, 50.1], ['Kingdom of Denmark',      12.6, 55.7],
+  ['Kingdom of Norway',       10.8, 59.9], ['Kingdom of Sweden',       18.1, 59.3],
+  ['Teutonic Order',          19.0, 54.0], ['Grand Duchy of Lithuania',25.3, 54.7],
+  ['Novgorod Republic',       31.3, 58.5], ['Grand Duchy of Muscovy',  37.6, 55.8],
+  ['Principality of Galicia', 24.0, 49.8], ['Byzantine Empire',        29.0, 41.0],
+  ['Second Bulgarian Empire', 23.3, 42.7], ['Kingdom of Serbia',       20.9, 44.0],
+  ['Ottoman Beylik',          30.0, 40.4], ['Golden Horde',            34.0, 45.3],
+  ['Hafsid Sultanate',        10.2, 36.8], ['Marinid Sultanate',       -5.0, 34.6],
+  ['Kingdom of Cyprus',       33.4, 35.1], ['Kingdom of Croatia',      16.4, 45.8],
+];
+
 // ------------------------------------------------------------------- a lord
 class Lord {
   constructor(g, id, name, color, bot){
@@ -281,6 +416,7 @@ class Lord {
     this.traitor = 0;
     this.nextThink = 0;
     this.tradeAt = 0;
+    this.home = null;      // seat of power on the Europe map, if any
     this.siegeAt = 0;
     // bot temperament
     const r = g.rand;
@@ -422,7 +558,16 @@ class Game {
     this.seedInt = (o.seed == null ? (Math.random() * 1e9) | 0 : o.seed | 0);
     this.rand = mulberry32(this.seedInt);
     this.preset = o.preset || 'continents';
-    this.W = o.w || 528; this.H = o.h || 288;
+    // Europe is ~47% land against the procedural maps' ~34%, so at the same
+    // grid it carries a third more ground and no war could finish inside the
+    // cap. The coastline is sampled from polygons, so a coarser grid costs
+    // nothing in geography — it just restores the pacing.
+    const fine = this.preset === 'europe' ? [456, 248] : [528, 288];
+    this.W = o.w || fine[0]; this.H = o.h || fine[1];
+    // Europe is cut up by seas, so taking ground means repeated crossings and a
+    // continental 65% is out of reach — as it was for every real power of the
+    // age. Half the map is the mark of a dominant one.
+    this.winPct = this.preset === 'europe' ? 0.50 : CFG.WIN_PCT;
     this.N = this.W * this.H;
     this.time = 0; this.ticks = 0;
     this.phase = 'place';                 // place -> war -> done
@@ -448,7 +593,81 @@ class Game {
   isWater(t){ return this.terrain[t] <= T_SHOAL; }
 
   // ---------------------------------------------------------------- map gen
+  // Real Europe: sample the coastline polygons, but warp the sample point with
+  // noise first so the coast is ragged instead of showing polygon edges, and
+  // raise ground near the mountain spines.
+  genEurope(){
+    const W = this.W, H = this.H, s = this.seedInt & 0xffff;
+    const spanLon = EU.lon1 - EU.lon0, spanLat = EU.lat1 - EU.lat0;
+    let land = 0;
+    for (let y = 0; y < H; y++){
+      for (let x = 0; x < W; x++){
+        const t = y * W + x;
+        // warp in degrees — about a third of a degree of wobble
+        const wx = (fbm(x / 26, y / 26, s + 17, 4, 0.5) - 0.5) * 0.9;
+        const wy = (fbm(x / 26, y / 26, s + 91, 4, 0.5) - 0.5) * 0.9;
+        const lon = EU.lon0 + (x + 0.5) / W * spanLon + wx;
+        const lat = EU.lat1 - (y + 0.5) / H * spanLat + wy;
+
+        let isLand = false;
+        for (let i = 0; i < EU.land.length && !isLand; i++){
+          const b = EU_BOX[i];
+          if (lon < b[0] - 0.2 || lon > b[2] + 0.2 || lat < b[1] - 0.2 || lat > b[3] + 0.2) continue;
+          if (inPoly(lon, lat, EU.land[i])) isLand = true;
+        }
+
+        if (!isLand){
+          // how far offshore, so shelf and deep ocean read differently
+          let near = 9;
+          for (let i = 0; i < EU.land.length; i++){
+            const b = EU_BOX[i];
+            if (lon < b[0] - 3 || lon > b[2] + 3 || lat < b[1] - 3 || lat > b[3] + 3) continue;
+            const poly = EU.land[i];
+            for (let j = 0, k = poly.length - 1; j < poly.length; k = j++){
+              const d = segDist(lon, lat, poly[k][0], poly[k][1], poly[j][0], poly[j][1]);
+              if (d < near) near = d;
+            }
+          }
+          this.terrain[t] = near < 0.45 ? T_SHOAL : T_SEA;
+          this.elev[t] = Math.max(0, 70 - near * 8) | 0;
+          continue;
+        }
+
+        land++;
+        // height from the nearest mountain spine
+        let rise = 0;
+        for (const rg of EU.ranges){
+          for (let j = 1; j < rg.pts.length; j++){
+            const d = segDist(lon, lat, rg.pts[j-1][0], rg.pts[j-1][1], rg.pts[j][0], rg.pts[j][1]);
+            if (d < rg.r * 1.6){
+              const v = Math.max(0, 1 - d / (rg.r * 1.6));
+              if (v > rise) rise = v;
+            }
+          }
+        }
+        // Ranges are spines, not plateaus: square the falloff so the high ground
+        // is a narrow crest with foothills, instead of a wide white dome.
+        const rough = fbm(x / 30, y / 30, s + 555, 4, 0.55);
+        const h = rise * rise * 0.80 + rise * 0.16 + rough * 0.26;
+        this.elev[t] = Math.max(90, Math.min(250, (108 + h * 132) | 0));
+        if (h > 0.66)      this.terrain[t] = T_PEAK;
+        else if (h > 0.33) this.terrain[t] = T_HILL;
+        else {
+          // woods thicken north and east, thin around the Mediterranean
+          const wet = fbm(x / 34, y / 34, s + 4321, 4, 0.55)
+                    + Math.max(0, (lat - 45) / 26) * 0.30
+                    + Math.max(0, (lon - 12) / 30) * 0.16
+                    - Math.max(0, (42 - lat) / 10) * 0.22;
+          this.terrain[t] = wet > 0.56 ? T_WOOD : T_PLAIN;
+        }
+      }
+    }
+    this.landCount = land;
+    this.peakByte = 215;
+  }
+
   genMap(){
+    if (this.preset === 'europe') return this.genEurope();
     const W = this.W, H = this.H, s = this.seedInt & 0xffff;
     const P = {
       continents: { sc: 56,  edge: 0.58, mid: 0.05, land: 0.34 },
@@ -607,6 +826,38 @@ class Game {
     p.civ = CFG.START_POP; p.levy = 0; p.sold = CFG.START_SOLD;
     p.arms = CFG.START_ARMS; p.trained = 0;
     return got;
+  }
+
+  // The tile nearest a lord's historical seat that is actually free ground.
+  // Spirals outward, because a seat can easily fall on water or a peak once the
+  // coastline has been roughened.
+  seatAtHome(p){
+    if (!p.home) return -1;
+    const spanLon = EU.lon1 - EU.lon0, spanLat = EU.lat1 - EU.lat0;
+    const cx = Math.round((p.home[0] - EU.lon0) / spanLon * this.W);
+    const cy = Math.round((EU.lat1 - p.home[1]) / spanLat * this.H);
+    for (let r = 0; r < 40; r++){
+      let best = -1, bestD = 1e9;
+      for (let y = cy - r; y <= cy + r; y++){
+        for (let x = cx - r; x <= cx + r; x++){
+          if (r > 0 && Math.abs(y - cy) !== r && Math.abs(x - cx) !== r) continue;
+          if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
+          const t = y * this.W + x;
+          if (this.terrain[t] < T_PLAIN || this.terrain[t] === T_PEAK) continue;
+          if (this.owner[t] >= 0) continue;
+          let clash = false;
+          for (const q of this.players){
+            if (!q.alive || !q.tiles || q === p) continue;
+            if (Math.hypot(x - q.cx, y - q.cy) < 11){ clash = true; break; }
+          }
+          if (clash) continue;
+          const d = (x - cx) ** 2 + (y - cy) ** 2;
+          if (d < bestD){ bestD = d; best = t; }
+        }
+      }
+      if (best >= 0) return best;
+    }
+    return -1;
   }
 
   // Somewhere on land, ideally far from every banner already planted.
@@ -799,22 +1050,57 @@ class Game {
         else { b.x += dx / d * step; b.y += dy / d * step; }
       }
     }
-    // galleys rule the water around them
+    // Galleys hunt. A galley that has reached its station looks for the nearest
+    // ship it is not sworn to protect, and gives chase — it does not sit on a
+    // point waiting for prey to blunder into it.
     for (const g of this.boats){
       if (g.dead || g.kind !== 'galley' || !g.station) continue;
+      const mine = this.players[g.owner];
+      if (!mine.alive){ g.dead = true; continue; }
+
+      let prey = null, best = CFG.HUNT_R;
       for (const o of this.boats){
         if (o.dead || o === g) continue;
-        if (o.owner === g.owner || this.players[g.owner].allies.has(o.owner)) continue;
+        if (o.owner === g.owner || mine.allies.has(o.owner)) continue;
         const d = Math.hypot(o.x - g.x, o.y - g.y);
-        if (d > 7) continue;
-        if (o.kind === 'galley'){
-          o.hp -= 26 * dt; g.hp -= 26 * dt;
-          if (o.hp <= 0){ o.dead = true; this.log(`${this.players[o.owner].name} loses a war galley`, 'war', o.owner); }
+        if (d < best){ best = d; prey = o; }
+      }
+
+      if (prey){
+        if (best > 1.4){
+          // give chase, but only over water — a galley cannot cross a headland
+          const dx = prey.x - g.x, dy = prey.y - g.y, d = Math.hypot(dx, dy) || 1;
+          const step = g.speed * dt;
+          const nx = g.x + dx / d * step, ny = g.y + dy / d * step;
+          const t = (Math.round(ny) * W) + Math.round(nx);
+          if (t >= 0 && t < this.N && this.isWater(t)){ g.x = nx; g.y = ny; }
+          else {                                  // slide along the coast instead
+            const sx2 = g.x + dx / d * step, sy2 = g.y;
+            const st = (Math.round(sy2) * W) + Math.round(sx2);
+            if (st >= 0 && st < this.N && this.isWater(st)){ g.x = sx2; }
+            else g.y = ny;
+          }
+        } else if (prey.kind === 'galley'){
+          prey.hp -= 26 * dt; g.hp -= 26 * dt;
+          if (prey.hp <= 0){ prey.dead = true; this.log(`${this.players[prey.owner].name} loses a war galley`, 'war', prey.owner); }
           if (g.hp <= 0){ g.dead = true; this.log(`${this.players[g.owner].name} loses a war galley`, 'war', g.owner); }
         } else {
-          o.dead = true;
-          this.log(`A galley of ${this.players[g.owner].name} sinks ${o.kind === 'trade' ? 'a trader' : 'a longship'} of ${this.players[o.owner].name}`, 'war', g.owner);
+          prey.dead = true;
+          if (prey.kind === 'trade'){
+            // a taken trader is plunder, not just a sinking
+            mine.ducats += CFG.PRIZE;
+            this.log(`A galley of ${mine.name} takes a trader of ${this.players[prey.owner].name}`, 'war', g.owner);
+          } else {
+            this.log(`A galley of ${mine.name} sinks a longship of ${this.players[prey.owner].name}`, 'war', g.owner);
+          }
         }
+      } else {
+        // nothing to chase: patrol a slow circuit so the sea lane is visibly held
+        g.patrol = (g.patrol || 0) + dt * 0.5;
+        const px = g.hx + Math.cos(g.patrol) * CFG.PATROL_R;
+        const py = g.hy + Math.sin(g.patrol) * CFG.PATROL_R;
+        const t = (Math.round(py) * W) + Math.round(px);
+        if (t >= 0 && t < this.N && this.isWater(t)){ g.x = px; g.y = py; }
       }
     }
     if (this.boats.length) this.boats = this.boats.filter(b => !b.dead);
@@ -822,7 +1108,7 @@ class Game {
 
   landfall(b){
     const p = this.players[b.owner];
-    if (b.kind === 'galley'){ b.station = true; return; }
+    if (b.kind === 'galley'){ b.station = true; b.hx = b.x; b.hy = b.y; b.patrol = 0; return; }
     b.dead = true;
     if (!p.alive && b.kind !== 'trade') return;
     if (b.kind === 'trade'){
@@ -1103,6 +1389,32 @@ class Game {
     return true;
   }
 
+  // A lord with harbours and coin keeps the sea lanes near them. Without this
+  // no AI ever built a galley, so the whole naval game only existed if a human
+  // happened to buy one.
+  botGalley(p){
+    if (!p.coast.size || !p.st[B_HARBOR].size) return false;
+    if (p.ducats < 1400) return false;
+    const have = this.boats.filter(b => !b.dead && b.kind === 'galley' && b.owner === p.id).length;
+    if (have >= Math.min(3, 1 + (p.st[B_HARBOR].size >> 1))) return false;
+    if (this.rand() > 0.35) return false;
+    const from = pickFrom(p.coast, this.rand);
+    if (from < 0) return false;
+    // station it out at sea, not hard against our own beach
+    let spot = -1;
+    for (let k = 0; k < 30; k++){
+      const x = (from % this.W) + Math.round((this.rand() - 0.5) * 26);
+      const y = ((from / this.W) | 0) + Math.round((this.rand() - 0.5) * 26);
+      if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
+      const t = y * this.W + x;
+      if (this.isWater(t)){ spot = t; break; }
+    }
+    if (spot < 0) return false;
+    if (this.sail('galley', p.id, from, spot, 0) !== null) return false;
+    p.ducats -= 1000;
+    return true;
+  }
+
   botNaval(p){
     if (!p.coast.size || p.ducats < 400 || p.sold < 500) return false;
     const marks = this.players.filter(q => q.alive && q.id !== p.id && !p.allies.has(q.id) && q.coast.size > 3);
@@ -1137,6 +1449,7 @@ class Game {
   botThink(p){
     this.botBuild(p);
     this.botMobilise(p);
+    this.botGalley(p);
     const ring = this.ringOf(p, 420);
     if (this.botSiege(p, ring)) return;
 
@@ -1362,7 +1675,7 @@ class Game {
       }
     }
     if (this.phase !== 'war') return;
-    if (best >= 0 && bestT / this.landCount >= CFG.WIN_PCT){ this.phase = 'done'; this.winner = best; }
+    if (best >= 0 && bestT / this.landCount >= this.winPct){ this.phase = 'done'; this.winner = best; }
     else if (alive <= 1){ this.phase = 'done'; this.winner = best; }
     else if (this.humanId >= 0 && !this.players[this.humanId].alive){ this.phase = 'done'; this.winner = best; }
   }
@@ -1401,7 +1714,21 @@ function makeMatch(opts){
     h.w = { farm:0.40, forge:0.22, trade:0.28, works:0.10 };
     h.standing = 0.08; h.mobil = 0; h.warMobil = 0;
   }
-  for (let i = 0; i < opts.bots; i++) g.addLord(pickName(), pickColor(), true);
+  // On the Europe map the AI lords are the powers of the age, seated at home.
+  if (g.preset === 'europe'){
+    const pool = POWERS.slice();
+    for (let i = pool.length - 1; i > 0; i--){       // deal them out, seeded
+      const j = (g.rand() * (i + 1)) | 0;
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    for (let i = 0; i < opts.bots; i++){
+      const power = pool[i % pool.length];
+      const lord = g.addLord(power ? power[0] : pickName(), pickColor(), true);
+      if (power) lord.home = [power[1], power[2]];
+    }
+  } else {
+    for (let i = 0; i < opts.bots; i++) g.addLord(pickName(), pickColor(), true);
+  }
   return g;
 }
 

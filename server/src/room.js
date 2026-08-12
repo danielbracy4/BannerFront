@@ -22,7 +22,7 @@ class Room {
   constructor(io, opts){
     this.io = io;
     this.id = 'r' + (nextRoomId++);
-    this.preset = (opts && opts.preset) || 'continents';
+    this.preset = (opts && opts.preset) || 'europe';
     this.targetLords = Math.min(MAX_LORDS, (opts && opts.lords) || 41);
     this.seed = (Math.random() * 1e9) | 0;
 
@@ -185,8 +185,9 @@ class Room {
     }
     for (const p of g.players){
       if (p.tiles) continue;
-      const t = g.pickSeat(minDist);
-      if (t >= 0) g.seat(p, t);
+      const t = p.home ? g.seatAtHome(p) : -1;      // the powers start at home
+      const spot = t >= 0 ? t : g.pickSeat(minDist);
+      if (spot >= 0) g.seat(p, spot);
     }
     g.audit();
     g.phase = 'war';

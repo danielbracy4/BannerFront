@@ -126,6 +126,29 @@ install and no Node. Note that a local preview server cannot read `~/Desktop`
 (macOS TCC denies it and it surfaces as a 404) — `./sync-preview.sh` copies the
 project into the session scratchpad first.
 
+## The map
+
+The default map is **Europe around 1300**, built from coastline polygons and
+mountain spines in degrees rather than from noise, so Iberia, the British Isles,
+Scandinavia, Italy, Anatolia and the Black Sea are where they belong. The sample
+point for each field is warped by noise before it is tested, which keeps the
+coast ragged instead of showing the straight edges of the polygons. A test
+checks 19 landmarks (London, Rome, Stockholm, the Alps, the Pyrenees, the
+Atlantic, the Black Sea…) fall on the right kind of ground.
+
+Because the geometry is sampled from polygons it is resolution-independent: the
+Europe grid is deliberately coarser (456×248 against 528×288) purely for pacing,
+and the geography is unchanged by it.
+
+Rivals are the powers of the age — France, England, Castile, Aragon, Venice,
+Byzantium, the Golden Horde, the Teutonic Order, Novgorod, the Ottoman Beylik
+and thirty-odd more — each seated at its historical capital. Players choose
+their own ground.
+
+**A winning share on Europe is 50%, not 65%.** The seas cut the map up, so
+ground has to be taken across them; at 65% no match resolved inside 45 minutes
+(0 of 3). At 50% every match resolves, averaging 26 minutes.
+
 ## Balance, and how it got there
 
 Current shape at 40 lords on *Continents*, from `./tools/sim.sh`:
