@@ -1480,9 +1480,17 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.12.0';
+const VERSION = '0.12.1';
 
 const CHANGELOG = [
+  { v:'0.12.1', when:'the AI', notes:[
+    'Lords now <b>site their works within reach of the ones they already hold</b>, so a road forms and the network compounds. Scattering them at random built the same number of works for a fraction of the trade.',
+    'They <b>answer the shortage they actually have</b>: a hungry realm moves hands back to the fields and raises a farm; an under-equipped one raises a blacksmith. Before, they only read worker demand — so they starved with fields to spare and marched half-armed with coin in the treasury.',
+    'They <b>will not march a rabble at another lord</b>. A host with no arms fights at a third strength, so they wait for the forges. Open ground has no defenders, so an unarmed levy will still do for claiming it.',
+    'They <b>keep a garrison</b> instead of emptying the castle while being invaded, and will not start a second war while losing the first.',
+    'They <b>storm what they have besieged</b> rather than investing one province and attacking another.',
+    'They <b>extend supply before advancing</b> — if the front has gone out of reach of the network, a town near it comes before anything else.',
+  ]},
   { v:'0.12.0', when:'ground', notes:[
     '<b>Works take up room.</b> A Town, Castle or Farm needs <b>3×3</b> of your own ground; a Harbour, Blacksmith, Siege Works or Watchtower needs <b>2×2</b>.',
     'You can no longer cram an entire economy onto a ten-field island. Land is the real constraint now, and where you build is a decision rather than a formality.',

@@ -190,6 +190,36 @@ is free, that trade rises with connection, that caravans run and pay, that
 supply reaches from a town and not beyond it, and that losing a work severs what
 it held together.
 
+## The lords
+
+Bot behaviour is measured by `node tools/botsense.js`, which asks whether their
+decisions cohere rather than whether they win:
+
+```
+networked lords   93%   works joined into a trading network
+marches armed     93%   rabble marches 2%
+lords starving    11%
+reckless marches   3%   marched out heavily while already invaded
+```
+
+Three findings worth keeping:
+
+**Answer the shortage you have, not the one your plan predicts.** Building from
+the worker-demand gap alone left lords starving with fields to spare and
+marching half-armed with coin in the treasury: the gap said "jobs are staffed",
+the realm said "there is no food and no kit". Reading `food < 0` and
+`equip < 0.7` directly took equipment from ~50% to ~78%.
+
+**Shifting labour beats building when you are hungry.** A farm needs coin and a
+3×3 site; moving hands back to the fields works instantly. But the response has
+to be gentle and the recovery quick — a first version that lunged at farms and
+crept back dropped equipment 20 points as a side effect.
+
+**Siting works near existing ones matters more than how many you build.** Since
+roads form automatically between works in range, placing near what you hold
+compounds the network: 84% → 94% of lords ended with a connected trading network
+from that change alone.
+
 ## Balance, and how it got there
 
 Current shape at 40 lords on *Continents*, from `./tools/sim.sh`:

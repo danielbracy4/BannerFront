@@ -435,6 +435,7 @@ class Lord {
     this.net = null;       // cached: tile -> component id, and each size
     this.netDirty = true;
     this.siegeAt = 0;
+    this.siegeAim = -1; this.siegeAimAt = 0;
     // bot temperament
     const r = g.rand;
     this.aggr  = 0.25 + r() * 0.7;   // how readily it attacks
@@ -445,6 +446,7 @@ class Lord {
     this.doctrine = names[(r() * names.length) | 0];
     const A = ARCHETYPES[this.doctrine];
     this.w = { farm:A.w.farm, forge:A.w.forge, trade:A.w.trade, works:A.w.works };
+    this.doctrineW = { farm:A.w.farm, forge:A.w.forge, trade:A.w.trade, works:A.w.works };
     this.standing = A.standing;
     this.warMobil = A.mobil;
   }
@@ -1515,18 +1517,44 @@ class Game {
   }
 
   botBuild(p){
-    const interior = () => {
-      const spread = Math.max(3, Math.sqrt(p.tiles) * 0.9);
-      for (let k = 0; k < 30; k++){
+    // Site new works within reach of the ones we already hold, so a road forms
+    // and the network compounds. Scattering them at random across the realm
+    // built the same number of works for a fraction of the trade.
+    const near = (anchor, type) => {
+      const ax = anchor % this.W, ay = (anchor / this.W) | 0;
+      for (let k = 0; k < 34; k++){
+        const r = 5 + this.rand() * (ECON.ROAD_MAX * 0.7 - 5);
+        const a = this.rand() * Math.PI * 2;
+        const x = Math.round(ax + Math.cos(a) * r), y = Math.round(ay + Math.sin(a) * r);
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
+        const t = y * this.W + x;
+        if (!this.canPlace(p.id, t, type)) return t;
+      }
+      return -1;
+    };
+    const interior = type => () => {
+      const nodes = p.nodes;
+      if (nodes.length){
+        const t = near(nodes[(this.rand() * nodes.length) | 0], type);
+        if (t >= 0) return t;
+      }
+      const spread = Math.max(4, Math.sqrt(p.tiles) * 0.9);
+      for (let k = 0; k < 34; k++){
         const x = Math.round(p.cx + (this.rand() - 0.5) * spread * 2);
         const y = Math.round(p.cy + (this.rand() - 0.5) * spread * 2);
         if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
         const t = y * this.W + x;
-        if (this.owner[t] === p.id && this.clear(t)) return t;
+        if (!this.canPlace(p.id, t, type)) return t;
       }
       return -1;
     };
-    const fromSet = set => { const t = pickFrom(set, this.rand); return (t >= 0 && this.clear(t)) ? t : -1; };
+    const fromSet = (set, type) => {
+      for (let k = 0; k < 12; k++){
+        const t = pickFrom(set, this.rand);
+        if (t >= 0 && !this.canPlace(p.id, t, type)) return t;
+      }
+      return -1;
+    };
     const put = (type, get) => {
       if (p.ducats < p.costOf(type)) return false;
       const t = get(); if (t < 0) return false;
@@ -1536,20 +1564,37 @@ class Game {
     const cap = p.jobCap;
     // Build where the doctrine says workers should go but there is no work for
     // them: a priority with no building behind it employs nobody.
+    // Answer the shortage you actually have. Reading only the worker-demand gap
+    // left lords starving with fields to spare and marching half-armed with
+    // coin in the treasury: the gap said "jobs are staffed", the realm said
+    // "there is no food and no kit".
+    if (p.food < 0 && put(B_FARM, interior(B_FARM))) return;
+    if (p.sold > 200 && p.equip < 0.7 && put(B_FORGE, interior(B_FORGE))) return;
+
     const starved = SECTORS
       .map(sct => ({ sct, gap: p.w[sct] * p.civ - (cap[sct] || 0) }))
       .sort((a, b) => b.gap - a.gap)[0];
     if (starved && starved.gap > 40){
-      if (starved.sct === 'farm'  && put(B_FARM,  interior)) return;
-      if (starved.sct === 'forge' && put(B_FORGE, interior)) return;
-      if ((starved.sct === 'trade' || starved.sct === 'works') && put(B_TOWN, interior)) return;
+      if (starved.sct === 'farm'  && put(B_FARM,  interior(B_FARM))) return;
+      if (starved.sct === 'forge' && put(B_FORGE, interior(B_FORGE))) return;
+      if ((starved.sct === 'trade' || starved.sct === 'works') && put(B_TOWN, interior(B_TOWN))) return;
     }
-    if (p.idle > 60 && put(B_TOWN, interior)) return;
-    if (p.ducats > 1500 * (1.2 - p.greed) && p.st[B_CASTLE].size < T / 240 && put(B_CASTLE, () => fromSet(p.border))) return;
-    if (p.coast.size > 6 && p.st[B_HARBOR].size < 1 + T / 650 && put(B_HARBOR, () => fromSet(p.coast))) return;
-    if (T > 340 && p.ducats > 5200 && p.st[B_SIEGE].size < 2 && put(B_SIEGE, interior)) return;
-    if (p.ducats > 4200 && p.st[B_TOWER].size < 1 + T / 850 && put(B_TOWER, interior)) return;
-    if (p.ducats > 2800 && put(B_TOWN, interior)) return;
+    // An army fighting beyond supply pays half again for every field. If our
+    // own frontier has gone out of reach of the network, a town near the front
+    // is worth more than anything else we could build.
+    if (p.attacks.length && p.nodes.length){
+      const front = pickFrom(p.border, this.rand);
+      if (front >= 0 && !p.supplied(front % this.W, (front / this.W) | 0)){
+        const t = fromSet(p.border, B_TOWN);
+        if (t >= 0 && put(B_TOWN, () => t)) return;
+      }
+    }
+    if (p.idle > 60 && put(B_TOWN, interior(B_TOWN))) return;
+    if (p.ducats > 1500 * (1.2 - p.greed) && p.st[B_CASTLE].size < T / 240 && put(B_CASTLE, () => fromSet(p.border, B_CASTLE))) return;
+    if (p.coast.size > 6 && p.st[B_HARBOR].size < 1 + T / 650 && put(B_HARBOR, () => fromSet(p.coast, B_HARBOR))) return;
+    if (T > 340 && p.ducats > 5200 && p.st[B_SIEGE].size < 2 && put(B_SIEGE, interior(B_SIEGE))) return;
+    if (p.ducats > 4200 && p.st[B_TOWER].size < 1 + T / 850 && put(B_TOWER, interior(B_TOWER))) return;
+    if (p.ducats > 2800 && put(B_TOWN, interior(B_TOWN))) return;
   }
 
   botSiege(p, ring){
@@ -1586,6 +1631,8 @@ class Game {
     if (tile < 0 || !bestFacing) return false;
     if (this.raise(p.id, kind, tile) !== null) return false;
     p.siegeAt = this.time + 26 + this.rand() * 22;
+    p.siegeAim = target;      // storm the ground we just invested
+    p.siegeAimAt = this.time + 70;
     return true;
   }
 
@@ -1631,6 +1678,21 @@ class Game {
 
   // Mobilise when threatened, stand down when safe — the whole point of the
   // levy system is that peace is worth something.
+  // A realm that cannot feed itself moves hands back to the fields. Building a
+  // farm only helps if there is coin and room for one; shifting labour works
+  // immediately, and is what a steward would actually do.
+  botFeed(p, dt){
+    if (p.food < 0){
+      p.w.farm = Math.min(0.70, p.w.farm + 0.02);
+      for (const sct of SECTORS){
+        if (sct !== 'farm') p.w[sct] = Math.max(0.05, p.w[sct] - 0.007);
+      }
+    } else if (p.food > 2 && p.doctrineW){
+      // comfortable again — drift back toward the doctrine we were built for
+      for (const sct of SECTORS) p.w[sct] += (p.doctrineW[sct] - p.w[sct]) * 0.12;
+    }
+  }
+
   botMobilise(p){
     let threat = 0;
     for (const [id, heat] of p.grudge) if (heat > 4) threat += heat;
@@ -1647,6 +1709,7 @@ class Game {
   }
 
   botThink(p){
+    this.botFeed(p);
     this.botBuild(p);
     this.botMobilise(p);
     this.botGalley(p);
@@ -1697,6 +1760,9 @@ class Game {
         const share = q.tiles / this.landCount;
         if (share > 0.22) w *= 1 + (share - 0.22) * 4;
       }
+      // ground we are already besieging is breached and half-starved — that is
+      // where an assault belongs
+      if (o >= 0 && o === p.siegeAim && this.time < p.siegeAimAt) w *= 2.2;
       if (w > bestW){ bestW = w; bestT = o; }
     }
     if (bestT === null){ this.botNaval(p); return; }
@@ -1706,8 +1772,22 @@ class Game {
     // Readiness is now "how much of my nation is actually under arms and
     // equipped", not "how full is my population bar".
     const need = bestT < 0 ? 0.02 : 0.07 + (1 - p.aggr) * 0.05;
-    if (ready < need || p.sold < 60) return;
-    const ratio = bestT < 0 ? 0.5 + p.aggr * 0.25 : 0.62 + p.aggr * 0.33;
+    // A host with no arms fights at a third strength. Marching one at a lord is
+    // throwing men away — wait for the forges. Open ground has no defenders, so
+    // an unarmed levy will still do for claiming it.
+    const fit = bestT < 0 ? ready : ready * p.quality;
+    if (fit < need || p.sold < 60) return;
+    let ratio = bestT < 0 ? 0.5 + p.aggr * 0.25 : 0.62 + p.aggr * 0.33;
+    // Keep a garrison if somebody is already at our throat: committing the whole
+    // host to an attack while being invaded loses both the attack and the realm.
+    let pressed = 0;
+    for (const a of this.attacks) if (!a.dead && a.target === p.id) pressed++;
+    if (pressed){
+      // already committed more than we hold in reserve — see the fight we are
+      // in through before starting another
+      if (p.committed > p.sold * 1.2) return;
+      ratio *= Math.max(0.30, 1 - 0.30 * pressed);
+    }
     this.launch(p.id, bestT, p.sold * ratio);
   }
 
