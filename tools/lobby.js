@@ -139,6 +139,13 @@ for (let n = 1; n <= GAMES; n++){
     if (terr < 2 || terr === 5) badGround++;
   }
   ok(badGround === 0, `  game ${n}: every standard stands on valid land`);
+
+  // ...and they must not all land in one corner. Quarter the map and count
+  // which quarters got lords: a scatter that piles everyone into Iberia is
+  // random in the small and useless in the large.
+  const quads = new Set();
+  for (const t of tiles) quads.add(((t % g.W) < g.W / 2 ? 'W' : 'E') + (((t / g.W) | 0) < g.H / 2 ? 'N' : 'S'));
+  ok(quads.size === 4, `  game ${n}: lords rise across the whole map (${[...quads].sort().join(' ')})`);
 }
 
 console.log('');

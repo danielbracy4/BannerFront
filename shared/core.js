@@ -556,10 +556,30 @@ const EU = {
      [21.50,64.00],[19.20,63.00],[17.40,62.00],[18.30,61.00],[17.60,60.30],[18.60,59.50],
      [17.20,58.80],[16.60,57.00],[15.00,56.10],[14.50,55.40],[13.00,55.40],[12.60,56.20],
      [11.90,57.30],[11.20,58.30],[10.60,59.10],[9.60,58.90],[8.00,58.15],[6.60,58.10]],
-    // Finland and Karelia
+    // Finland
     [[21.50,64.00],[22.20,65.80],[24.00,66.00],[27.00,68.50],[29.00,69.60],[30.50,69.75],
      [31.50,68.30],[30.20,66.20],[31.50,64.20],[31.00,62.00],[28.50,61.00],[27.50,60.40],
      [25.00,60.00],[23.00,59.85],[21.30,60.50],[21.10,62.20]],
+    // Karelia, the White Sea country and the Kola.
+    //
+    // This was missing entirely, and it is a large hole to leave: everything
+    // north of about 60°N and east of Finland — Karelia, Onega, the White Sea
+    // shore, Arkhangelsk, the whole Kola peninsula — was open water. Finland
+    // touched Russia only through a strip of shoal, so the two were not joined
+    // by land at all and no army could march between them. Novgorod sat on the
+    // edge of an ocean that should have been its hinterland.
+    //
+    // Traced so the White Sea stays a real inlet rather than being filled in:
+    // the boundary runs west along the Kola's southern shore at about 66°N,
+    // turns at the Kandalaksha gulf and comes back east along the Karelian
+    // shore at about 65°N, leaving the water between them outside the land.
+    [[28.50,61.00],[31.00,62.00],[31.50,64.20],[30.20,66.20],[31.50,68.30],[30.50,69.75],
+     [33.00,69.55],[36.00,68.95],[38.50,68.25],[40.60,67.85],[41.80,67.30],
+     [41.00,66.55],[39.00,66.25],[37.40,66.00],[35.90,65.60],   // south shore of the Kola
+     [34.00,66.25],[32.60,66.60],                                // the Kandalaksha gulf
+     [32.90,65.20],[34.30,64.90],[36.00,64.80],[37.60,64.80],[39.20,64.90],[40.60,65.00],
+     [42.00,65.10],[42.00,60.40],                                // Arkhangelsk, then the map's edge
+     [38.00,59.90],[34.00,60.10],[31.00,60.20],[29.50,60.40]],
     // Jutland, and the Danish islands behind it
     [[8.45,55.30],[8.15,56.20],[8.60,57.10],[9.60,57.60],[10.60,57.75],[10.40,56.90],
      [10.20,56.15],[10.70,55.80],[10.00,55.30],[9.50,55.10],[9.40,54.82],[8.60,55.00]],

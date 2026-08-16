@@ -172,6 +172,16 @@ and Transylvania became open sea, and the map still looked perfectly plausible.
 mix, which is the other half — a map that has quietly become half upland is a
 balance change, and it does not look like one.
 
+**A missing landmass does not announce itself.** The whole Russian north —
+Karelia, Onega, the White Sea shore, Arkhangelsk, the entire Kola peninsula —
+was open sea, because the Ruthenia polygon stopped at about 60°N and nothing
+covered anything above it. Forty-three landmark checks all passed, because none
+of them happened to stand on the missing ground. What catches this is asking
+whether the map is *one landmass*: a flood fill from central Finland now has to
+reach Novgorod, Moscow, Arkhangelsk, Murmansk, Kyiv, Paris and Rome overland, and
+before the fix Finland was an island. Point checks verify the places you thought
+of; connectivity verifies the ones you did not.
+
 Because the geometry is sampled from polygons it is resolution-independent: the
 Europe grid is deliberately coarser (456×248 against 528×288) purely for pacing,
 and the geography is unchanged by it.

@@ -55,6 +55,14 @@ const MARKS = [
   ['Moscow marches',    38.00, 55.50, LAND],
   ['Toledo',            -4.03, 39.86, LAND],
   ['Milan',              9.19, 45.47, LAND],
+  // The Russian north. All of this was open sea once — Karelia, Onega, the
+  // White Sea shore, Arkhangelsk and the whole Kola — which left Finland
+  // unattached to Russia and Novgorod on the edge of an ocean.
+  ['Karelia',           31.50, 62.50, LAND],
+  ['Onega country',     35.50, 62.50, LAND],
+  ['Arkhangelsk',       40.50, 64.55, COAST],
+  ['Kola interior',     36.00, 67.50, LAND],
+  ['Murmansk',          33.08, 68.97, COAST],
 
   // seas — a lord must not be able to walk across these
   ['the North Sea',      3.00, 56.20, SEA],
@@ -70,6 +78,8 @@ const MARKS = [
   ['the Black Sea',     34.00, 43.40, SEA],
   ['the western ocean',-11.00, 48.00, SEA],
   ['the Norwegian Sea',  2.00, 64.00, SEA],
+  ['the White Sea',     37.50, 65.50, SEA],
+  ['the Barents Sea',   35.00, 70.60, SEA],
 
   // the great ranges — hill or peak, not farmland
   ['the Alps',          10.50, 46.55, HIGH],
@@ -149,6 +159,43 @@ const SEATS = [
   ['Bulgaria', 23.3, 42.7, 'slavic'],   ['Athens', 23.7, 38.0, 'greek'],
   ['Konya', 32.5, 37.9, 'anatolian'],   ['Tunis', 10.2, 36.0, 'maghrebi'],
 ];
+// A landmass can be missing entirely without a single point-check noticing, so
+// long as no landmark happened to be standing on it. What catches that is
+// asking whether you can *walk* from one country to another: the whole Russian
+// north was open sea, and what gave it away was Finland being an island.
+console.log('');
+{
+  const g = games[0], W = g.W, H = g.H;
+  const tile = (lon, lat) => Math.round((EU.lat1 - lat) / (EU.lat1 - EU.lat0) * H) * W
+                           + Math.round((lon - EU.lon0) / (EU.lon1 - EU.lon0) * W);
+  const from = tile(26.0, 62.5);                     // central Finland
+  const seen = new Uint8Array(g.N), stack = [from];
+  seen[from] = 1;
+  let reached = 0;
+  while (stack.length){
+    const t = stack.pop(); reached++;
+    const x = t % W, y = (t / W) | 0;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const u = ny * W + nx;
+      if (seen[u] || g.terrain[u] < 2) continue;
+      seen[u] = 1; stack.push(u);
+    }
+  }
+  const walk = [['Novgorod', 31.27, 58.52], ['Moscow', 37.60, 55.80],
+                ['Arkhangelsk', 40.50, 64.55], ['Murmansk', 33.08, 68.97],
+                ['Kyiv', 30.52, 50.45], ['Paris', 2.35, 48.86], ['Rome', 12.50, 41.90]];
+  let cut = 0;
+  for (const [name, lon, lat] of walk){
+    const there = !!seen[tile(lon, lat)];
+    if (!there){ cut++; console.log('  \x1b[31m✗\x1b[0m ' + pad(name, 22) + 'cannot be reached overland from Finland'); }
+  }
+  fails += cut;
+  if (!cut) console.log('  \x1b[32m✓\x1b[0m ' + pad('one landmass', 22) +
+    `Finland walks to Novgorod, Moscow, Arkhangelsk, Murmansk, Kyiv, Paris and Rome (${reached.toLocaleString()} fields)`);
+}
+
 console.log('');
 let nameFails = 0;
 for (const [name, lon, lat, want] of SEATS){
