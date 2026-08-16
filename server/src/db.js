@@ -15,7 +15,17 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../data');
+// Where the ledger lives, in order of preference:
+//   1. DATA_DIR — an explicit choice always wins.
+//   2. RAILWAY_VOLUME_MOUNT_PATH — Railway injects this on its own the moment a
+//      volume is attached to the service. Reading it means attaching the volume
+//      is the *whole* deployment step: there is no second variable to go and
+//      set, and therefore no way to attach storage and still be writing to a
+//      disk that vanishes on the next deploy.
+//   3. ./data, for running locally (gitignored).
+const DATA_DIR = process.env.DATA_DIR
+  || process.env.RAILWAY_VOLUME_MOUNT_PATH
+  || path.resolve(__dirname, '../../data');
 const SESSION_DAYS = 30;
 
 let db = null;
@@ -60,6 +70,10 @@ function publicRow(a){
 
 module.exports = {
   get enabled(){ return !!db; },
+  // Surfaced on /healthz so it is possible to tell, from outside, whether the
+  // ledger is on durable storage or on a disk the next deploy will throw away.
+  get where(){ return db ? DATA_DIR : null; },
+  get onVolume(){ return !!db && !!process.env.RAILWAY_VOLUME_MOUNT_PATH; },
 
   signup(name, pass){
     if (!db) return { err: 'the ledger is closed on this server' };

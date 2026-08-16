@@ -492,12 +492,23 @@ A match record is written in exactly one place — `Room.finish`, on the
 authoritative server, for seats that carried an account. A solo result is the
 client's word, and the client's word is not a record.
 
-**Deploying it:** the database lives at `DATA_DIR/bannerfront.db`, defaulting to
-`./data` (gitignored). On Railway, attach a volume and set `DATA_DIR` to its
-mount path — without a volume the container's filesystem is ephemeral and every
-deploy starts the ledger blank. If `node:sqlite` is unavailable the server still
-boots and plays; it just reports `ledger: false` on `/healthz` and refuses
-signups.
+**Deploying it: attach a volume, and that is the whole step.** Railway injects
+`RAILWAY_VOLUME_MOUNT_PATH` the moment a volume is attached to a service, and the
+ledger reads it, so there is no second variable to remember and no way to attach
+storage while still writing to a disk the next deploy throws away. `DATA_DIR`
+overrides it if you want the file somewhere specific; failing both it falls back
+to `./data` (gitignored) for local runs.
+
+`/healthz` reports where it actually landed:
+
+```json
+{ "ledger": true, "ledgerAt": "/data", "onVolume": true }
+```
+
+`onVolume: false` in production means the container's filesystem is ephemeral and
+accounts will vanish on the next deploy. If `node:sqlite` is unavailable the
+server still boots and plays — it reports `ledger: false` and refuses signups,
+which is better than losing accounts silently.
 
 - **10 Hz** simulation, **5 Hz** broadcast. The spec called for 20 Hz; this is a
   game where a field changes hands every few seconds, so 20 doubles cost for

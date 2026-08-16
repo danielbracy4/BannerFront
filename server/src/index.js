@@ -95,7 +95,8 @@ function api(req, res){
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz'){
     res.writeHead(200, { 'Content-Type':'application/json' });
-    return res.end(JSON.stringify({ ok:true, rooms: rooms.size, ledger: db.enabled, uptime: process.uptime() }));
+    return res.end(JSON.stringify({ ok:true, rooms: rooms.size, ledger: db.enabled,
+      ledgerAt: db.where, onVolume: db.onVolume, uptime: process.uptime() }));
   }
   if (api(req, res)) return;
   let rel = decodeURIComponent((req.url || '/').split('?')[0]);
