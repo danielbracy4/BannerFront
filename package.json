@@ -1,11 +1,11 @@
 {
   "name": "bannerfront",
-  "version": "0.8.0",
+  "version": "0.14.0",
   "private": true,
   "description": "Bannerfront — authoritative multiplayer game server",
   "type": "commonjs",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "scripts": {
     "start": "node server/src/index.js",

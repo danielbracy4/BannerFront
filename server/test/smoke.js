@@ -63,9 +63,28 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   // --- placement: players choose their own ground -------------------------
   check(seen.start.placing > 0, `players get ${seen.start.placing}s to choose their ground`);
   const cg = new core.Game({ seed: seen.start.seed, preset: seen.start.preset });
-  let land = -1, far = -1;
-  for (let t = 0; t < cg.N; t++) if (cg.terrain[t] === 2){ land = t; break; }
-  for (let t = cg.N - 1; t >= 0; t--) if (cg.terrain[t] === 2){ far = t; break; }
+  // A seat needs room around it, not just to be land. Taking the first land
+  // tile in scan order gives whatever speck of northern coast the map happens
+  // to begin with, and the proximity rule below then has nowhere to plant a
+  // rival — it planted tile -1 and got refused for the wrong reason entirely.
+  const roomy = (fromEnd) => {
+    for (let i = 0; i < cg.N; i++){
+      const t = fromEnd ? cg.N - 1 - i : i;
+      const x = t % cg.W, y = (t / cg.W) | 0;
+      if (x < 16 || y < 16 || x >= cg.W - 16 || y >= cg.H - 16) continue;
+      if (cg.terrain[t] !== 2) continue;
+      let n = 0, seen = 0;
+      for (let dy = -12; dy <= 12; dy += 4){
+        for (let dx = -12; dx <= 12; dx += 4){
+          seen++;
+          if (cg.terrain[(y + dy) * cg.W + (x + dx)] === 2) n++;
+        }
+      }
+      if (n >= seen * 0.8) return t;
+    }
+    return -1;
+  };
+  const land = roomy(false), far = roomy(true);
 
   const refusedSea = new Promise(r => A.once('nope', r));
   A.emit('intent', { do:'seat', tile: 0 });                       // open sea
@@ -86,8 +105,11 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     for (let a = 0; a < 24; a++){
       const dx = Math.round(Math.cos(a / 24 * Math.PI * 2) * r);
       const dy = Math.round(Math.sin(a / 24 * Math.PI * 2) * r);
-      const t = land + dy * cg.W + dx;
-      if (t < 0 || t >= cg.N) continue;
+      // guard the column too, or a negative dx near the left edge wraps onto
+      // the previous row and lands somewhere else on the map entirely
+      const nx = (land % cg.W) + dx, ny = ((land / cg.W) | 0) + dy;
+      if (nx < 0 || ny < 0 || nx >= cg.W || ny >= cg.H) continue;
+      const t = ny * cg.W + nx;
       if (cg.terrain[t] === 2){ near = t; break; }
     }
   }
@@ -144,6 +166,47 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   B.close();
   await wait(1200);
   check(seen.states > 8, 'server survived a client disconnecting mid-match');
+
+  // --- the ledger ---------------------------------------------------------
+  // Accounts ride the same server, so they belong in the same smoke test. The
+  // name is stamped with the clock so repeat runs against a persistent DATA_DIR
+  // do not trip over their own earlier signup.
+  const api = async (path, body, tok) => {
+    const r = await fetch(`http://localhost:${PORT}/api/${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+                             tok ? { Authorization: 'Bearer ' + tok } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  // Names cap at 18 characters, so keep the stamp short — and assert the
+  // *reason* each refusal gives, or a check can pass because something else
+  // went wrong. The first cut of this test used a 20-character name: both
+  // signups failed on length, and "cannot be founded twice" passed green
+  // without the duplicate rule ever being reached.
+  const who = 'Smoke ' + Date.now().toString(36).slice(-6);
+  const up = await api('signup', { name: who, pass: 'portcullis88' });
+  check(up.status === 200 && !!up.body.token, 'a house can be founded' + (up.body.err ? ` (${up.body.err})` : ''));
+  const tok = up.body.token;
+  const dup = await api('signup', { name: who.toLowerCase(), pass: 'portcullis88' });
+  check(dup.status === 400 && /already sworn/.test(dup.body.err || ''),
+        'the same house cannot be founded twice, whatever the case' + (dup.body.err ? ` ("${dup.body.err}")` : ''));
+  const weak = await api('signup', { name: who + 'b', pass: 'short' });
+  check(weak.status === 400 && /password/.test(weak.body.err || ''),
+        'a feeble password is refused' + (weak.body.err ? ` ("${weak.body.err}")` : ''));
+  const bad = await api('login', { name: who, pass: 'notthewordatall' });
+  check(bad.status === 400 && /wrong/.test(bad.body.err || ''), 'the wrong word is refused');
+  const meRes = await api('me', null, tok);
+  check(meRes.status === 200 && meRes.body.account.name === who, 'the token names its house');
+  check(meRes.body.account.id === undefined, 'the row id stays on the server');
+  const anon = await api('me', null, 'not-a-real-token');
+  check(anon.status === 401, 'a forged token is refused');
+  const board = await api('leaderboard');
+  check(board.status === 200 && Array.isArray(board.body.lords), 'the roll of honour reads');
+  await api('logout', {}, tok);
+  const gone = await api('me', null, tok);
+  check(gone.status === 401, 'signing out ends the session');
 
   await wait(500);
   console.log('');

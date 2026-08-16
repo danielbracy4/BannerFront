@@ -7,6 +7,7 @@
 // client sends is trusted beyond "which of my own lord's controls did I touch".
 
 const core = require('../../shared/core.js');
+const db = require('./db.js');
 const { makeMatch, CFG, SECTORS, BUILDS, SIEGE, B_ALL } = core;
 
 const TICK_HZ      = CFG.TICK_HZ;      // 10 — the simulation rate
@@ -42,13 +43,14 @@ class Room {
   get humanCount(){ return this.seats.length; }
 
   // ------------------------------------------------------------------ lobby
-  addSeat(socket, name, colour){
+  addSeat(socket, name, colour, accountId){
     if (this.phase !== 'lobby') return false;
     this.seats.push({
       socketId: socket.id,
       name: String(name || 'A Lord').slice(0, 18),
       colour: /^#[0-9a-f]{6}$/i.test(colour || '') ? colour : null,
       lordId: -1, seated: false,
+      accountId: accountId == null ? null : accountId,
     });
     socket.join(this.id);
     this.sendLobby();
@@ -104,9 +106,8 @@ class Room {
       lord.bot = false;
       lord.name = seat.name;
       if (seat.colour) lord.color = seat.colour;
-      lord.doctrine = 'your own';
-      lord.w = { farm:0.40, forge:0.22, trade:0.28, works:0.10 };
-      lord.standing = 0.08; lord.mobil = 0;
+      lord.w = { farm:0.40, forge:0.24, trade:0.26, works:0.10 };
+      lord.standing = core.ECON.PEASANT_LEVY; lord.mobil = 0;
       seat.lordId = lord.id;
     });
 
@@ -257,7 +258,7 @@ class Room {
       p.id, p.tiles, Math.round(p.civ), Math.round(p.levy), Math.round(p.sold),
       Math.round(p.arms), Math.round(p.ducats), p.alive ? 1 : 0, Math.round(p.committed),
       +(p.food || 0).toFixed(2), +(p.income || 0).toFixed(2), +(p.upkeep || 0).toFixed(2),
-      +(p.armsRate || 0).toFixed(2),
+      +(p.armsRate || 0).toFixed(2), Math.round(p.mustered || 0),
     ]);
 
     const events = g.events.slice(this.lastEventSent);
@@ -279,6 +280,17 @@ class Room {
     clearInterval(this.tickTimer); clearInterval(this.castTimer); clearInterval(this.placeTimer);
     this.tickTimer = this.castTimer = null;
     const g = this.game;
+    // The ledger is written here and only here: the authoritative server, at
+    // the end of an online match. A solo result is the client's word, and the
+    // client's word is not a record.
+    for (const seat of this.seats){
+      if (seat.accountId == null || seat.lordId < 0) continue;
+      const lord = g.players[seat.lordId];
+      db.recordMatch(seat.accountId, {
+        won: g.winner === seat.lordId,
+        share: lord ? lord.peak / g.landCount : 0,
+      });
+    }
     this.io.to(this.id).emit('over', {
       winner: g.winner,
       name: g.winner >= 0 ? g.players[g.winner].name : null,
@@ -368,8 +380,10 @@ class Room {
             if (v >= 0 && v <= 1) me.w[s] = v;
           }
         }
-        if (msg.standing != null) me.standing = Math.max(0, Math.min(0.4, +msg.standing || 0));
-        if (msg.mobil != null)    me.mobil    = Math.max(0, Math.min(0.6, +msg.mobil || 0));
+        // The peasant levy is not the player's to set — it is simply there.
+        // Only mobilisation above it is an order, and it is paid for in coin
+        // as the men are raised.
+        if (msg.mobil != null) me.mobil = Math.max(0, Math.min(0.6, +msg.mobil || 0));
         return;
       }
     }

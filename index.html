@@ -40,6 +40,21 @@
 
   /* ---------- left: your realm ---------- */
   #left{position:absolute;left:10px;top:10px;width:222px;padding:11px 13px 12px}
+  /* The herald sits opposite the leaderboard, above the trays: the one part of
+     the screen nothing else claims, so it never covers what it is pointing at. */
+  #herald{position:absolute;right:10px;bottom:112px;width:296px;padding:11px 13px 12px;
+          font-size:12.5px;line-height:1.45;z-index:6}
+  #heraldHead{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#a89566;
+              margin-bottom:7px;display:flex;align-items:baseline;gap:6px}
+  #heraldStep{color:#6f6045}
+  #heraldOff{margin-left:auto;font-size:10px;letter-spacing:.08em;padding:1px 6px;
+             background:none;border:1px solid #4a3d24;color:#8a7850;cursor:pointer}
+  #heraldOff:hover{color:#d9c48d;border-color:#6d5a34}
+  #heraldWhat{color:#efe4c6;font-size:13.5px;margin-bottom:5px}
+  #heraldWhy{color:#b6a377;margin-bottom:7px}
+  #heraldWhy b{color:#d9c48d;font-weight:400}
+  #heraldDo{color:#8fae62;font-size:12px}
+  #heraldDo.done{color:#c9a227}
   #myflag{display:flex;align-items:center;gap:9px;margin-bottom:9px}
   #myswatch{width:16px;height:20px;flex:0 0 16px;border:1px solid rgba(0,0,0,.6);
     clip-path:polygon(0 0,100% 0,100% 100%,50% 82%,0 100%)}
@@ -187,6 +202,14 @@
   .fld input,.fld select{width:100%;padding:7px 9px;background:#141009;color:#eadfbe;
     border:1px solid #5c4c2d;font-family:inherit;font-size:13px;border-radius:2px}
   .fld input:focus,.fld select:focus{outline:none;border-color:var(--gold)}
+  /* The ledger row borrows the same ink as the fields above it, so signing in
+     reads as part of the card rather than as raw browser furniture. */
+  #ledgerBox input{padding:5px 8px;background:#141009;color:#eadfbe;font-size:12px;
+    border:1px solid #3a2f1c;font-family:inherit}
+  #ledgerBox input:focus{outline:none;border-color:var(--gold)}
+  #ledgerBox button{padding:5px 11px;margin-left:5px;font-size:11px;letter-spacing:.1em;
+    background:#1b1610;color:#c3b590;border:1px solid #4a3d24;cursor:pointer;font-family:inherit}
+  #ledgerBox button:hover{color:#e9dcba;border-color:var(--gold)}
   #swatches{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
   #swatches i{width:22px;height:22px;border:2px solid transparent;cursor:pointer;border-radius:2px}
   #swatches i.sel{border-color:#fff}
@@ -261,9 +284,7 @@
     <div class="tsep"></div>
     <span class="cap" id="capLords">Lords</span><b id="tlords">0</b>
     <div class="tsep"></div>
-    <span class="cap">Age</span><b id="clock">0:00</b>
-    <div class="tsep"></div>
-    <button id="speed" style="font-size:12px;letter-spacing:.1em">▶ 1×</button>
+    <span class="cap">Age</span><b id="clock">1300</b>
   </div>
 
   <aside id="left" class="panel">
@@ -303,6 +324,12 @@
     <div id="asks"></div>
   </div>
   <div id="pop" class="panel"></div>
+  <div id="herald" class="panel" style="display:none">
+    <div id="heraldHead">The herald <span id="heraldStep"></span><button id="heraldOff">dismiss</button></div>
+    <div id="heraldWhat"></div>
+    <div id="heraldWhy"></div>
+    <div id="heraldDo"></div>
+  </div>
   <div id="banner"><div class="t"></div><div class="s"></div></div>
 </div>
 
@@ -338,6 +365,24 @@
       <button class="cta" id="btnPlay">Muster online</button>
       <button class="cta" id="btnSolo" style="border-color:#5c4c2d;color:#c3b590">Play alone</button>
     </div>
+    <div id="ledgerBox" style="margin-top:12px;padding-top:10px;border-top:1px solid #3a2f1c;font-size:12.5px;color:#a89566">
+      <span id="ledgerIn">
+        <input id="acName" maxlength="18" placeholder="house name" style="width:126px">
+        <input id="acPass" type="password" maxlength="64" placeholder="password" style="width:104px">
+        <button id="btnAcIn">Sign in</button>
+        <button id="btnAcUp">Found a house</button>
+      </span>
+      <span id="ledgerOut" style="display:none">
+        Sworn as <b id="acWho" style="color:#e9dcba">—</b>
+        <span id="acRecord"></span>
+        <button id="btnAcOut" style="margin-left:8px">Sign out</button>
+      </span>
+      <div id="acMsg" style="margin-top:4px;min-height:14px;color:#c98a4b"></div>
+      <div class="hint" style="margin-top:2px">an account keeps your record in online wars — solo play needs none</div>
+    </div>
+    <label class="hint" style="display:block;margin-top:8px;cursor:pointer">
+      <input type="checkbox" id="cbHerald" style="vertical-align:-2px"> the herald teaches — guided first war (solo)
+    </label>
     <div class="hint">drag to pan · scroll to zoom · left-click to march · right-click for orders</div>
     <div class="build" id="buildlab">—</div>
   </div>
@@ -389,11 +434,12 @@ const $ = id => document.getElementById(id);
 const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
 
 let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
+let capitalMarks = null;   // where the powers will rise, shown during placement
 let pcol = [];                       // per-lord rgb, precomputed
 let cam = { x: 0, y: 0, z: 3 };
 let mode = 'attack', modeArg = null;
 let hover = -1, hoverTile = -1;
-let speed = 1, running = false;
+let running = false;
 const DPR = Math.min(2, window.devicePixelRatio || 1);
 
 function fit(){
@@ -429,11 +475,44 @@ function buildBase(){
   }
 }
 
+// Territory is painted by *relationship*, not just by house: a lord sworn to
+// you carries your own tincture, and anyone with a host in the field against you
+// turns red. The point is that the diplomatic picture should be readable from
+// the map at a glance, without opening the leaderboard.
+// game.atWar is the one definition of enmity — a live assault either way, or a
+// grudge deep enough to count. The leaderboard already used it, and painting the
+// map from a second, narrower rule of my own made the two disagree: the
+// leaderboard said "at war" while the map showed the lord in their own colours.
+const ENEMY_RED = '#b0281e';
+const atWarWithMe = id => game.humanId >= 0 && game.atWar(game.humanId, id);
 function buildPalette(){
+  const me = game.humanId;
+  const mine = me >= 0 ? game.players[me].color : null;
   pcol = game.players.map(p => {
-    const [r, g, b] = hex(p.color);
+    let col = p.color;
+    if (me >= 0 && p.id !== me){
+      if (game.players[me].allies.has(p.id)) col = mine;      // sworn: your colour
+      else if (atWarWithMe(p.id)) col = ENEMY_RED;            // at war: red
+    }
+    const [r, g, b] = hex(col);
     return { r, g, b, lr: r + (255-r)*0.30, lg: g + (255-g)*0.30, lb: b + (255-b)*0.30 };
   });
+}
+// Rebuilding the palette is cheap; repainting 113,000 fields is not. So only do
+// it when the diplomatic picture has actually changed.
+let diploKey = '';
+function refreshDiplomacyColours(){
+  if (!game || game.humanId < 0) return;
+  const me = game.players[game.humanId];
+  let k = '';
+  for (const p of game.players){
+    if (p.id === me.id) continue;
+    k += me.allies.has(p.id) ? 'a' : atWarWithMe(p.id) ? 'w' : '.';
+  }
+  if (k === diploKey) return;
+  diploKey = k;
+  buildPalette();
+  game.dirtyAll = true;
 }
 
 function paint(t){
@@ -538,6 +617,35 @@ function render(now){
   const z = cam.z;
   const vx0 = mxOf(0) - 2, vx1 = mxOf(W) + 2, vy0 = myOf(0) - 2, vy1 = myOf(H) + 2;
 
+  // While the player chooses their ground on Europe, show where the powers of
+  // the age will rise. Placement is the most consequential decision in the
+  // match, and it used to be made blind: Iberia *looks* like a quiet peninsula
+  // and actually seats five crowns. Faded marks, so they read as history, not
+  // as claims already made.
+  if (game.phase === 'place' && game.preset === 'europe' && typeof POWERS !== 'undefined'){
+    if (!capitalMarks){
+      const sLon = EU.lon1 - EU.lon0, sLat = EU.lat1 - EU.lat0;
+      capitalMarks = POWERS.map(([name, lon, lat]) => ({
+        name: name.replace(/^(Kingdom|Crown|Duchy|County|Republic|Emirate|Grand Duchy|Principality|Lordship|Archbishopric|Second) of /, ''),
+        x: (lon - EU.lon0) / sLon * game.W, y: (EU.lat1 - lat) / sLat * game.H,
+      }));
+    }
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    const fs = Math.max(8, Math.min(13, z * 2.4));
+    c.font = `${fs}px "Iowan Old Style", Palatino, Georgia, serif`;
+    for (const m of capitalMarks){
+      if (m.x < vx0 || m.x > vx1 || m.y < vy0 || m.y > vy1) continue;
+      const px = sx(m.x), py = sy(m.y);
+      c.fillStyle = 'rgba(20,14,6,.55)';
+      c.beginPath(); c.arc(px, py, Math.max(2, z * 0.55), 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(0,0,0,.5)'; c.lineWidth = 2.5;
+      c.strokeText(m.name, px, py - fs * 0.95);
+      c.fillStyle = 'rgba(233,220,186,.62)';
+      c.fillText(m.name, px, py - fs * 0.95);
+    }
+    c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  }
+
   // roads, drawn beneath the works they join
   if (z > 0.9){
     c.lineCap = 'round';
@@ -622,14 +730,23 @@ function render(now){
   // banners: house name + levy over each realm
   const me = game.humanId >= 0 ? game.players[game.humanId] : null;
   c.textAlign = 'center'; c.textBaseline = 'middle';
-  for (const p of game.players){
-    if (!p.alive || p.tiles < 12) continue;
+  // Biggest realms first, then drop any banner that would land on one already
+  // drawn. Two capitals close together used to overprint into gibberish —
+  // Austria across Poland read as "Duchy of Austrian of Poland" — and the
+  // bigger realm is the one worth naming when only one will fit.
+  const drawn = [];
+  const banners = game.players.filter(p => p.alive && p.tiles >= 12)
+                              .sort((a, b) => b.tiles - a.tiles);
+  for (const p of banners){
     const px = sx(p.cx + 0.5), py = sy(p.cy + 0.5);
     if (px < -80 || py < -40 || px > W + 80 || py > H + 40) continue;
     const span = Math.sqrt(p.tiles) * z;
     if (span < 26) continue;
     const fs = Math.max(9, Math.min(21, span * 0.19));
     c.font = `${fs}px "Iowan Old Style", Palatino, Georgia, serif`;
+    const halfW = c.measureText(p.name).width / 2, halfH = fs * 1.25;
+    if (drawn.some(d => Math.abs(d.x - px) < d.hw + halfW && Math.abs(d.y - py) < d.hh + halfH)) continue;
+    drawn.push({ x: px, y: py, hw: halfW, hh: halfH });
     c.lineWidth = Math.max(2, fs * 0.28); c.strokeStyle = 'rgba(0,0,0,.72)';
     c.strokeText(p.name, px, py - fs * 0.55);
     c.fillStyle = p === me ? '#ffd465' : '#f2ead4';
@@ -838,22 +955,18 @@ function renderRealmTray(){
     </div>`).join('');
   $('tray').innerHTML = `<div class="th">Realm — where your people work</div>${rows}
     <div class="th" style="padding-top:9px">Network — <span id="netline">—</span></div>
-    <div class="th" style="padding-top:9px">Army — every soldier is a worker lost</div>
-    <div class="prow"><span class="pn">Standing</span>
-      <input class="pri" type="range" min="0" max="40" value="${Math.round(me.standing * 100)}" data-a="standing">
-      <span class="pv" data-sv="standing">—</span>
-      <span class="pd">professionals, always ready, always paid</span></div>
+    <div class="th" style="padding-top:9px">Army — <span id="musterline">—</span></div>
     <div class="prow"><span class="pn">Mobilise</span>
       <input class="pri" type="range" min="0" max="60" value="${Math.round(me.mobil * 100)}" data-a="mobil">
       <span class="pv" data-sv="mobil">—</span>
-      <span class="pd">emergency levies — they must train, and be armed</span></div>`;
+      <span class="pd">men called above the peasant levy — paid for as they are raised</span></div>`;
   $('tray').querySelectorAll('input.pri').forEach(el => {
     el.addEventListener('input', () => {
       const m = game.players[game.humanId];
       if (el.dataset.w) m.w[el.dataset.w] = +el.value / 100;
       else m[el.dataset.a] = +el.value / 100;
       realmReadouts();
-      NET.send({ do:'realm', w: m.w, standing: m.standing, mobil: m.mobil });
+      NET.send({ do:'realm', w: m.w, mobil: m.mobil });
     });
   });
   realmReadouts();
@@ -879,9 +992,22 @@ function realmReadouts(){
       : `${roads} road${roads === 1 ? '' : 's'} joining ${works} works · `
         + `<span style="color:${bonus > 0 ? '#8fae62' : '#a89566'}">+${(bonus * 100).toFixed(0)}% trade</span>`;
   }
-  for (const a of ['standing', 'mobil']){
-    const el = $('tray').querySelector(`[data-sv="${a}"]`);
-    if (el) el.textContent = Math.round(me[a] * 100) + '%';
+  const mv = $('tray').querySelector('[data-sv="mobil"]');
+  if (mv) mv.textContent = Math.round(me.mobil * 100) + '%';
+  // What the muster is actually costing, right now. A mobilisation order that
+  // the treasury cannot fund shows as stalled rather than silently doing
+  // nothing, which is the confusing version.
+  const ml = $('tray').querySelector('#musterline');
+  if (ml){
+    const rate = me.mustered || 0;
+    const want = Math.max(0, Math.min(1, me.standing + me.mobil)) * me.pop - (me.sold + me.levy);
+    ml.innerHTML = rate > 0.5
+      ? `raising <b>${fmt(Math.round(rate))}</b> ${Math.round(rate) === 1 ? 'man' : 'men'} a second · `
+        + `<span style="color:#c9a227">${fmt(Math.round(rate * ECON.MUSTER_COST))}`
+        + ` ${Math.round(rate * ECON.MUSTER_COST) === 1 ? 'ducat' : 'ducats'} a second</span>`
+      : want > 1 && me.ducats < 1
+        ? '<span class="warn">the treasury is empty — no men can be raised</span>'
+        : 'every soldier is a worker lost';
   }
 }
 
@@ -1131,7 +1257,6 @@ addEventListener('keydown', e => {
   if (!game || game.phase !== 'war') return;
   if (e.key === 'Escape'){ setMode('attack'); closeCtx(); showTray(null); }
   if (e.key >= '1' && e.key <= '7') setMode('build', +e.key);
-  if (e.key === ' '){ e.preventDefault(); cycleSpeed(); }
   const r = $('ratio');
   if (e.key === 'ArrowUp'){ r.value = Math.min(100, +r.value + 5); ratioLab(); }
   if (e.key === 'ArrowDown'){ r.value = Math.max(1, +r.value - 5); ratioLab(); }
@@ -1163,15 +1288,11 @@ $('left').onclick = () => {
   cam.x = me.cx; cam.y = me.cy; cam.z = Math.max(cam.z, 4); clampCam();
 };
 
-function cycleSpeed(){
-  speed = speed === 0 ? 1 : speed === 1 ? 2 : speed === 2 ? 4 : 0;
-  $('speed').textContent = speed === 0 ? '❚❚ paused' : '▶ ' + speed + '×';
-}
-$('speed').onclick = cycleSpeed;
-
 let lastEvent = 0, boardT = 0;
 function updateHUD(){
   if (!game || game.humanId < 0) return;
+  refreshDiplomacyColours();
+  HERALD.tick();
   const me = game.players[game.humanId];
   const pop = Math.max(1, me.pop);
   $('spop').textContent = fmt(me.pop);
@@ -1205,8 +1326,7 @@ function updateHUD(){
   if (openCat === 'realm') realmReadouts();
   ratioLab(); refreshTools();
 
-  const t = Math.floor(game.time);
-  $('clock').textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+  $('clock').textContent = game.year;
   if (game.phase === 'place' && NET.online){
     $('capLeader').textContent = 'Choose';
     $('capLords').textContent = 'Planted';
@@ -1352,7 +1472,7 @@ const NET = {
       sock.on('denied', m => fail((m && m.why) || 'refused by the server'));
       sock.on('connect', () => {
         done = true; this.online = true;
-        sock.emit('join', { name, colour });
+        sock.emit('join', { name, colour, token: LEDGER.token });
       });
       // a refused order must say why, or the player just sees nothing happen
       sock.on('nope',  m => toast((m && m.why) || 'That order was refused.'));
@@ -1397,7 +1517,8 @@ function onServerStart(m){
     NET.seated = false;
     game.phase = 'place';
     setMode('attack');
-    banner('Choose your ground', 'click anywhere on land to plant your standard', 4000);
+    capitalMarks = null;
+    banner('Choose your ground', 'click anywhere on land — the faded seats are powers that will rise there', 4000);
   } else {
     game.phase = 'war';
     banner('The war begins', `${NET.lords.length} banners fly`, 2600);
@@ -1450,6 +1571,7 @@ function onServerState(m){
     p.arms = row[5]; p.ducats = row[6]; p.alive = !!row[7];
     p.netCommitted = row[8];
     p.food = row[9]; p.income = row[10]; p.upkeep = row[11]; p.armsRate = row[12];
+    p.mustered = row[13];
     p.starving = p.food < 0;
   }
   game.time = m.t; game.aliveCount = m.alive; game.leader = m.leader;
@@ -1480,9 +1602,32 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.12.1';
+const VERSION = '0.14.0';
 
 const CHANGELOG = [
+  { v:'0.14.0', when:'settling, teaching, and a ledger', notes:[
+    '<b>Claiming empty land no longer eats your army.</b> Open ground has no defenders, so taking it is settlement rather than battle: the men you send <b>mostly stay as farmers on the new land</b>. Before this, committing your whole host to unclaimed fields bought thirty of them and left you with nothing — the ground was cheap and the army was gone.',
+    '<b>The placement screen shows where the powers will rise.</b> Choosing your ground is the most consequential decision in a match and it was made blind. Iberia <i>looks</i> like a quiet peninsula and seats five crowns; the Russian steppe seats two. Now you can see it before you plant.',
+    '<b>A herald will teach you the game.</b> Nine steps through your first war — each order, what it moves, and why it matters — that advance when you actually do the thing, not on a timer. On by default the first time; there is a tick-box on the title card.',
+    '<b>Every order is now written down.</b> The book has a full reference: each action, and the resource it trades for which.',
+    '<b>Houses can be sworn to the ledger.</b> Found a house on the title card and your online wars are kept — matches fought, wars won, and the greatest share of a realm you ever held. Solo play never asks, and an account is never required to play.',
+  ]},
+  { v:'0.13.0', when:'war is something you prepare for', notes:[
+    '<b>Battles are rolled for.</b> Every field taken from another lord is a fight: both sides roll, and <b>your armoury loads the dice</b> — each 5% armed is worth 0.05, up to 1.00 for a fully equipped host. Both sides bleed for the exchange and the ground only moves if the attacker wins, so a well-armed defence can throw an assault back off its own walls. Defending needs no orders: your standing army does it. Claiming <i>empty</i> ground is not a battle and is not rolled for.',
+    '<b>Allies wear your colours and enemies turn red.</b> The map now reads as a diplomatic picture rather than forty unrelated tinctures.',
+    'Fixed: <b>attacking while you were attacked sent your advance behind enemy lines.</b> A front is queued along your border, but a counter-push could retake the ground behind it and leave your assault converting fields deep inside the enemy with nothing joining them to you. An advance now has to stay attached to the realm behind it.',
+    '<b>There are no doctrines any more.</b> Nobody is born mercantile or military. Every realm is run the same way, and what separates two lords is whether they troubled to get ready before they marched.',
+    '<b>A war has to be prepared for.</b> No lord opens one until the men are called up and have actually arrived, there are arms for them, and there is coin in hand to keep them in the field — an invasion fleet included, which is checked when it loads rather than when it beaches. <b>Claiming empty ground asks none of this</b>: open land has no defenders, and the opening scramble is a race, not a war.',
+    'So the scramble is now the time to build forges and fill a treasury. When the free land runs out, the lords who did are the ones ready to move.',
+    'The clock is now a <b>date</b>. A war opens in 1300 and runs on into the next century, and the houses it raises are named for the year and the country they rise in — a lordship in Kent and a county on the Rhine no longer share a pool of invented syllables, and by 1470 the survivors are crowns and grand duchies rather than baronies.',
+    'There is <b>no speed control</b>. Every realm runs at the same pace.',
+    '<b>Europe redrawn.</b> Coastlines are traced through the headlands and gulfs that give a country its shape — Cornwall, Brittany, the boot of Italy with a real heel and toe, the Adriatic, the Aegean, the Gulf of Bothnia, the Danish islands. Mountain ranges swell and pinch along their length instead of lying on the map like sausages.',
+    '<b>One army slider.</b> You always have a peasant levy; it is simply there. What you choose is how many men to call <i>above</i> it, and every one of them costs ducats to muster, paid as he is raised. A rich realm raises a host in a hurry; a poor one orders it and watches it trickle in.',
+    '<b>Ground falls faster, and a great host takes it faster still.</b> A field of open ground costs a levy far less than it did, and the advance now scales with the size of what you sent — sixteen thousand men move a front nearly four times as fast as a thousand. Before, anything above a middling host bought a longer war rather than a quicker one.',
+    'Fixed: on Europe the opening banner told you to take <b>65%</b> of the realm. It has always been 50% there.',
+    'Fixed: rival banners drawn on top of one another, which turned two neighbours into one unreadable smear.',
+    'Fixed: the chronicle is no longer three-fifths galley traffic between lords you have never met. Your own ships still always report.',
+  ]},
   { v:'0.12.1', when:'the AI', notes:[
     'Lords now <b>site their works within reach of the ones they already hold</b>, so a road forms and the network compounds. Scattering them at random built the same number of works for a fraction of the trade.',
     'They <b>answer the shortage they actually have</b>: a hungry realm moves hands back to the fields and raises a farm; an under-equipped one raises a blacksmith. Before, they only read worker demand — so they starved with fields to spare and marched half-armed with coin in the treasury.',
@@ -1575,8 +1720,7 @@ because you own ground.</p>
 <h4>Moving around</h4>
 <p><span class="keys">drag</span> pan · <span class="keys">scroll</span> zoom ·
 <span class="keys">click</span> a land to march on it · <span class="keys">right-click</span> anywhere
-for orders · <span class="keys">Space</span> pause and change speed ·
-<span class="keys">1</span>–<span class="keys">7</span> pick a work to place ·
+for orders · <span class="keys">1</span>–<span class="keys">7</span> pick a work to place ·
 <span class="keys">Esc</span> cancel. Click your own panel, top left, to find your lands again.</p>
 
 <h4>Your people</h4>
@@ -1589,7 +1733,7 @@ for orders · <span class="keys">Space</span> pause and change speed ·
 <p>These are <b>priorities, not percentages</b>. Your civilians are spread across the four sectors in
 proportion to the sliders, then capped by how many jobs your buildings actually offer.</p>
 <div class="row2"><div class="lhs">Farms</div><div class="rhs">food, and so population growth. Run short and your people starve and your numbers fall.</div></div>
-<div class="row2"><div class="lhs">Forges</div><div class="rhs">the <b>only</b> source of arms. Arms equip soldiers; a wholly unequipped host fights at <b>${Math.round(ECON.UNARMED * 100)}%</b> and pays for every field in blood.</div></div>
+<div class="row2"><div class="lhs">Forges</div><div class="rhs">the <b>only</b> source of arms, and arms are what win battles. Every field you take from another lord is fought for: <b>both sides roll</b>, and your armoury loads the dice — every <b>5%</b> armed is worth <b>0.05</b> on the roll, up to <b>1.00</b> for a fully equipped host. Both sides bleed for the exchange, and the ground only moves if the attacker wins. A rabble rolls with nothing added and fights at <b>${Math.round(ECON.UNARMED * 100)}%</b> besides.</div></div>
 <div class="row2"><div class="lhs">Trade</div><div class="rhs">ducats — but only through towns and harbours. Trade priority with no town does nothing at all.</div></div>
 <div class="row2"><div class="lhs">Works</div><div class="rhs">construction labour, which discounts what you build.</div></div>
 <p>The figure beside each slider — <b>"1,085 of 12.0k"</b> — is <b>workers employed of jobs available</b>.
@@ -1597,9 +1741,13 @@ That is the number to watch. If it reads <b>no works</b>, you have set a priorit
 built nothing for, and those people are idle. If the left number is far below the right, you do not have
 the population to staff what you have built.</p>
 
-<h4>The army sliders</h4>
-<div class="row2"><div class="lhs">Standing</div><div class="rhs">a professional army held permanently. Always trained, always ready — and always paid for, out of the workforce forever. This is your insurance.</div></div>
-<div class="row2"><div class="lhs">Mobilise</div><div class="rhs">an emergency call-up on top of it. Cheap to want, slow to arrive: levies must train, and they need arms waiting for them. Mobilising more men than you have arms for gives you a rabble.</div></div>
+<h4>Raising an army</h4>
+<p>You always have a <b>peasant levy</b> — ${(ECON.PEASANT_LEVY * 100).toFixed(0)}% of your people, under arms
+whether you ordered it or not. It costs nothing, because it is barely an army. There is no slider for it.</p>
+<div class="row2"><div class="lhs">Mobilise</div><div class="rhs">every man called up <i>above</i> that peasant levy, and the only army order you give. Slow to arrive — levies must train, and they need arms waiting for them — and <b>expensive</b>: each man costs ${ECON.MUSTER_COST} ducats to muster, paid as he is raised. Mobilising more men than you have arms for gives you a rabble.</div></div>
+<p>This is the real price of war. A mobilisation your treasury cannot fund does not happen — the men are
+raised only as fast as you can pay for them, so going to war competes with everything else coin buys.
+A rich realm can raise a host in a hurry; a poor one orders it and watches it trickle in.</p>
 <p>Drop mobilisation back to zero and soldiers drift home to the fields. <b>Peace is worth money</b> —
 farms regain hands, forges restart, tax rises. Demobilising is a real move, not a surrender.</p>
 
@@ -1636,14 +1784,40 @@ stands you cannot attack each other, allies take up a grievance against anyone w
 those too far away to march will send you ducats instead. Breaking a pact early marks you an oathbreaker
 and everyone treats you accordingly.</p>
 
-<h4>Four ways to play</h4>
+<h4>Every order, and what it moves</h4>
+<p>The whole game in one table. <b>What it affects</b> is the part worth reading — nearly every order
+here is a trade of one resource for another, and knowing which is the difference between playing and clicking.</p>
+<div class="row2"><div class="lhs">Left-click land</div><div class="rhs">march on it. Open ground is <i>settled</i> — the men mostly stay as farmers on the new land. A lord's ground is <i>fought</i> for, and costs blood. <b>Affects:</b> your holdings, and your soldiers.</div></div>
+<div class="row2"><div class="lhs">Soldiers sent</div><div class="rhs">the share of your host committed to a march. <b>Affects:</b> how much ground one attack can take — and how little is left at home. Men in the field are not defending your border.</div></div>
+<div class="row2"><div class="lhs">Right-click</div><div class="rhs">the full orders for whatever is under the cursor: march, land a longship, swear or break a pact, raise a work, loose a siege. Only what actually applies is offered.</div></div>
+<div class="row2"><div class="lhs">Farm <span class="keys">1</span></div><div class="rhs">3×3. Food, and therefore population. <b>Affects:</b> everything — every soldier and every ducat is a person first. The first thing to build, always.</div></div>
+<div class="row2"><div class="lhs">Blacksmith</div><div class="rhs">2×2. The only source of arms. <b>Affects:</b> your roll in every battle — each 5% armed is +0.05, to +1.00 fully equipped. An unarmed host fights at ${Math.round(ECON.UNARMED*100)}%.</div></div>
+<div class="row2"><div class="lhs">Town</div><div class="rhs">3×3. Ducats, and your levy ceiling. <b>Affects:</b> whether you can afford to muster at all. Worth far more when roads join it to your other works.</div></div>
+<div class="row2"><div class="lhs">Castle</div><div class="rhs">3×3. Fortifies every field within ${CFG.CASTLE_R}. <b>Affects:</b> what an attacker pays per field — compounding through the depth of their advance. Stacks up to ${CFG.CASTLE_STACK} deep.</div></div>
+<div class="row2"><div class="lhs">Harbour</div><div class="rhs">2×2, on your coast. Trade, and a berth to launch ships from. <b>Affects:</b> income, and whether you can cross water at all.</div></div>
+<div class="row2"><div class="lhs">Siege works</div><div class="rhs">2×2. Lets you lay sieges. <b>Affects:</b> nothing on its own — it is the permission, not the weapon.</div></div>
+<div class="row2"><div class="lhs">Watchtower</div><div class="rhs">2×2. The garrison harries besiegers. <b>Affects:</b> how long an enemy siege survives on your ground.</div></div>
+<div class="row2"><div class="lhs">Longship</div><div class="rhs">carries a host to a distant shore. <b>Affects:</b> reach — the only way onto an island or across a sea. It lands and immediately attacks.</div></div>
+<div class="row2"><div class="lhs">War galley</div><div class="rhs">hunts shipping. <b>Affects:</b> your rivals' trade, and the safety of your own caravans at sea. A captured trader is plunder.</div></div>
+<div class="row2"><div class="lhs">Siege</div><div class="rhs">laid on your own frontier, investing the ground in front of it. <b>Affects:</b> the defenders' numbers and their walls — it guts a province rather than erasing it.</div></div>
+<div class="row2"><div class="lhs">Worker priorities</div><div class="rhs">how your civilians are spread across farms, forges, trade and building. <b>Affects:</b> which of your works are actually staffed. A priority with no building behind it employs nobody.</div></div>
+<div class="row2"><div class="lhs">Mobilise</div><div class="rhs">men called above your free peasant levy. <b>Affects:</b> your army, your treasury (${ECON.MUSTER_COST} ducats a head as they are raised) <i>and</i> your fields — soldiers eat but do not farm.</div></div>
+<div class="row2"><div class="lhs">Swear a pact</div><div class="rhs">a term alliance. <b>Affects:</b> who can attack you, and who pays you when you are attacked. Allies wear your colours on the map. Pacts lapse; breaking one early marks you an oathbreaker.</div></div>
+
+<h4>Going to war</h4>
+<p>There are no fixed playstyles to pick from, for you or for the AI. Every realm is run the same way,
+and the thing that separates them is whether they are <b>ready</b>. A lord will not open a war until
+three things are true, and neither should you:</p>
 <ul>
-<li><b>Agricultural</b> — heavy farms, fast growth, recovers from losses quickly. Vulnerable until it mobilises.</li>
-<li><b>Industrial</b> — many forges, deep arms stocks, strong in a long war. Needs a big workforce.</li>
-<li><b>Military</b> — large standing army, immediate readiness, expensive, weaker civilian economy.</li>
-<li><b>Mercantile</b> — trade network and deep coffers, small army, finances its friends.</li>
+<li><b>The men are called up</b> — mobilised, and actually arrived. Levies take ${ECON.TRAIN_TIME} seconds to train.</li>
+<li><b>There are arms for them</b> — a host below <b>${Math.round(ECON.WAR_EQUIP * 100)}%</b> equipped is
+a rabble, and fights at as little as ${Math.round(ECON.UNARMED * 100)}% strength.</li>
+<li><b>There is coin in hand</b> — mustering is paid for as the men are raised, and a war you cannot
+fund stops halfway.</li>
 </ul>
-<p>The AI lords each follow one of these. You start balanced and choose your own with the sliders.</p>
+<p><b>Claiming empty ground asks none of this.</b> Open land has no defenders, so the opening scramble
+is a race, not a war. It is when the free land runs out that realms turn on each other — and the ones
+that spent the scramble building forges and filling a treasury are the ones ready when it does.</p>
 `;
 
 function changelogHTML(){
@@ -1777,8 +1951,165 @@ function beginFromLobby(){
 
 // --------------------------------------------------------------- start / end
 let chosenColor = PALETTE[1];
+// ------------------------------------------------------------------ herald
+// A tutorial that teaches by watching rather than by talking. Each step names
+// one order, says what it moves and *why that matters*, and then waits for the
+// player to actually do it — `done()` reads real game state, so nothing
+// advances on a timer and nothing can be clicked past without understanding.
+// It only runs in solo play: a lobby of other people is no place to be reading.
+const HERALD_KEY = 'bannerfront.heraldSeen';
+const HERALD = {
+  on: false, i: 0, shown: -1,
+  steps: [
+    { at: 'Plant your standard',
+      why: 'Where you plant decides who you must fight. The faded names are the powers of the age, and they will rise where they stand — <b>Iberia and Italy seat five crowns each; the Russian steppe seats two</b>. A quiet corner buys you the time to build.',
+      go:  'Click open land to plant your banner.',
+      done: () => game.phase === 'war' && me().tiles > 0 },
+
+    { at: 'Raise a farm',
+      why: 'Farms make food, food makes people, and people are the whole game — every soldier, every ducat, every field you will ever take comes out of your population. <b>A realm that builds nothing stays small no matter how well it fights.</b>',
+      go:  'Open <b>Works</b> below, choose <b>Farm</b>, and place it on your own ground (it needs 3×3).',
+      done: () => me().st[B_FARM].size >= 1 },
+
+    { at: 'Claim open ground',
+      why: 'Empty land has no defenders, so taking it is settlement rather than battle: the men you send <b>mostly stay as farmers on the new land</b>. This is how a realm grows, and it is cheap — while the land lasts.',
+      go:  'Left-click unclaimed ground next to your realm to march on it.',
+      // You start on 21 fields, and one confident march with the opening host
+      // takes you to the middle thirties. A tutorial step should clear on one
+      // decisive action, not leave a new player marching twice and wondering.
+      done: () => me().tiles >= 30 },
+
+    { at: 'Raise a blacksmith',
+      why: 'Forges are the only source of arms, and <b>arms decide battles</b>. Every field taken from a lord is rolled for by both sides, and each 5% armed adds 0.05 to your roll — a full armoury rolls +1.00 against a rabble\'s nothing.',
+      go:  'Open <b>Works</b> and place a <b>Blacksmith</b> (2×2).',
+      done: () => me().st[B_FORGE].size >= 1 },
+
+    { at: 'Raise a town',
+      why: 'Towns turn labour into ducats, and ducats are what let you <b>muster an army at all</b> — every man called above your peasant levy is paid for as he is raised. Towns also earn far more when roads join them to your other works.',
+      go:  'Open <b>Works</b> and place a <b>Town</b> (3×3), near what you already hold.',
+      done: () => me().st[B_TOWN].size >= 1 },
+
+    { at: 'Mobilise',
+      why: 'You always have a peasant levy for nothing. Mobilising calls up men <b>above</b> it — they take time to train, arms to equip, and coin as they are raised. <b>Going to war competes with everything else your coin buys</b>, which is the whole decision.',
+      go:  'Open <b>Realm</b> below and raise <b>Mobilise</b> above 20%.',
+      done: () => me().mobil > 0.2 },
+
+    { at: 'Watch your arms',
+      why: 'The <b>Arms</b> line on the left reads what share of your soldiers are equipped. Below about two-thirds you are marching a rabble — it will lose the rolls, and men will die for ground you do not take.',
+      go:  'Wait until your host is at least 66% armed. Add forges if it stalls.',
+      done: () => me().equip >= 0.66 && me().sold > 200 },
+
+    { at: 'Make war',
+      why: 'Now it is worth it. Both sides roll for every field, both sides bleed, and the ground only moves if you win the exchange. <b>Defending needs no orders</b> — your standing army does it for you, wherever you are.',
+      go:  'Left-click a rival\'s land to march on it — or right-click for the full orders.',
+      done: () => game.attacks.some(a => !a.dead && a.owner === game.humanId && a.target >= 0) },
+
+    { at: 'The realm is yours to lose',
+      why: 'That is every order there is. Castles fortify ground, harbours and longships cross water, siege works break walls — all on the right-click menu, all priced in the trays. <b>Take half of Europe, or be the last banner flying.</b>',
+      go:  'The herald retires. Press <b>?</b> at any time for the book.',
+      done: () => false },
+  ],
+
+  begin(){
+    this.on = true; this.i = 0; this.shown = -1;
+    $('herald').style.display = 'block';
+    $('heraldOff').onclick = () => this.stop(true);
+    this.paint();
+  },
+  stop(remember){
+    this.on = false;
+    $('herald').style.display = 'none';
+    if (remember){ try { localStorage.setItem(HERALD_KEY, '1'); } catch(e){} }
+  },
+  paint(){
+    if (this.shown === this.i) return;
+    this.shown = this.i;
+    const s = this.steps[this.i];
+    $('heraldStep').textContent = `${this.i + 1} of ${this.steps.length}`;
+    $('heraldWhat').innerHTML = s.at;
+    $('heraldWhy').innerHTML = s.why;
+    $('heraldDo').innerHTML = s.go;
+    $('heraldDo').classList.toggle('done', this.i === this.steps.length - 1);
+  },
+  // Called from the HUD loop. Steps may be satisfied out of order — a player
+  // who builds a town before a farm should not be told to go back.
+  tick(){
+    if (!this.on || !game || game.humanId < 0) return;
+    const meLord = game.players[game.humanId];
+    if (!meLord || !meLord.alive) return this.stop(false);
+    let moved = false;
+    while (this.i < this.steps.length - 1 && this.steps[this.i].done()){ this.i++; moved = true; }
+    this.paint();
+    if (moved) $('heraldWhat').animate(
+      [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], 260);
+  },
+};
+const me = () => game.players[game.humanId];
+
+// ------------------------------------------------------------------ ledger
+// Accounts live on the server; the client holds only an opaque session token.
+// Signing in is entirely optional — it exists so an online war can be written
+// to your record, and solo play never asks for it.
+const LEDGER = {
+  token: (() => { try { return localStorage.getItem('bannerfront.token') || ''; } catch(e){ return ''; } })(),
+  account: null,
+  save(t){
+    this.token = t || '';
+    try { t ? localStorage.setItem('bannerfront.token', t) : localStorage.removeItem('bannerfront.token'); }
+    catch(e){}
+  },
+  async call(path, body, method){
+    const r = await fetch((NET.url || '') + '/api/' + path, {
+      method: method || (body ? 'POST' : 'GET'),
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+                             this.token ? { Authorization: 'Bearer ' + this.token } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return r.json().catch(() => ({ err: 'the server said nothing' }));
+  },
+  show(msg){
+    const on = !!this.account;
+    $('ledgerIn').style.display  = on ? 'none' : '';
+    $('ledgerOut').style.display = on ? '' : 'none';
+    $('acMsg').textContent = msg || '';
+    if (on){
+      const a = this.account;
+      $('acWho').textContent = a.name;
+      $('acRecord').textContent = a.played
+        ? ` · ${a.wins} won of ${a.played} · best ${a.bestShare}% of a realm`
+        : ' · no wars fought yet';
+      // Your account name *is* your house — otherwise the card says "sworn as
+      // House Ironvale" while you ride to war as a random name from the pool.
+      $('inName').value = a.name;
+    }
+  },
+  async refresh(){
+    if (!this.token) return this.show();
+    const r = await this.call('me');
+    this.account = r.account || null;
+    if (!this.account) this.save('');
+    this.show();
+  },
+  async enter(path){
+    const name = $('acName').value.trim(), pass = $('acPass').value;
+    if (!name || !pass) return this.show('a name and a password, both');
+    this.show('…');
+    const r = await this.call(path, { name, pass });
+    if (r.err) return this.show(r.err);
+    this.save(r.token); this.account = r.account; $('acPass').value = '';
+    this.show(path === 'signup' ? 'your house is founded' : '');
+  },
+};
+
 function setupStart(){
   $('wintxt').textContent = '50–65%';
+  // Ticked by default until the herald has been through once.
+  try { $('cbHerald').checked = localStorage.getItem(HERALD_KEY) !== '1'; } catch(e){ $('cbHerald').checked = true; }
+  $('btnAcIn').onclick  = () => LEDGER.enter('login');
+  $('btnAcUp').onclick  = () => LEDGER.enter('signup');
+  $('btnAcOut').onclick = async () => { await LEDGER.call('logout', {}); LEDGER.save(''); LEDGER.account = null; LEDGER.show('signed out'); };
+  $('acPass').addEventListener('keydown', e => { if (e.key === 'Enter') LEDGER.enter('login'); });
+  LEDGER.refresh();
   const picks = PALETTE.slice(0, 12);   // the twelve tinctures at full shade
   $('swatches').innerHTML = picks.map((c, i) =>
     `<i data-c="${c}" class="${i === 1 ? 'sel' : ''}" style="background:${c}"></i>`).join('');
@@ -1832,15 +2163,18 @@ function startMatch(){
   game.dirty.length = 0; game.dirtyAll = false;
 
   cam = { x: game.W / 2, y: game.H / 2, z: fitZoom() };
-  lastEvent = 0; msgCount = 0; speed = 1; running = true;
+  lastEvent = 0; msgCount = 0; running = true; diploKey = '';
   $('log').innerHTML = ''; $('asks').innerHTML = ''; $('asks').dataset.k = '';
   $('start').style.display = 'none'; $('over').style.display = 'none';
   $('hud').style.display = 'block';
   $('myname').textContent = name; $('myswatch').style.background = chosenColor;
-  $('speed').textContent = '▶ 1×';
   overShown = false;
   buildTools(); setMode('attack');
-  banner('Choose your ground', 'click anywhere on land to plant your banner', 6000);
+  capitalMarks = null;
+  // The herald teaches solo only — a lobby of other people is no place to be
+  // reading. It offers itself on a first visit and remembers being dismissed.
+  if (!NET.online && $('cbHerald').checked) HERALD.begin(); else HERALD.stop(false);
+  banner('Choose your ground', 'click anywhere on land — the faded seats are powers that will rise there', 6000);
 }
 
 function beginWar(tile){
@@ -1858,7 +2192,9 @@ function beginWar(tile){
   cam.x = tile % game.W; cam.y = (tile / game.W) | 0;
   cam.z = Math.min(6, Math.max(3, fitZoom() * 2.4)); clampCam();
   banner('The war begins', `${game.aliveCount} banners fly`, 2600);
-  toast(`<b>${me.name}</b> plants its standard. Take <b>${Math.round(CFG.WIN_PCT*100)}%</b> of the realm to win.`, 'big');
+  // game.winPct, not CFG.WIN_PCT — Europe wins at 50% and the banner was
+  // telling every player on that map to take 65%.
+  toast(`<b>${me.name}</b> plants its standard. Take <b>${Math.round(game.winPct*100)}%</b> of the realm to win.`, 'big');
   renderBoard();
 }
 
@@ -1889,8 +2225,8 @@ function frame(now){
   requestAnimationFrame(frame);
   const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
   last = now;
-  if (game && !NET.online && game.phase === 'war' && running && speed > 0){
-    acc += dt * speed;
+  if (game && !NET.online && game.phase === 'war' && running){
+    acc += dt;
     const step = 1 / CFG.TICK_HZ;
     let n = 0;
     while (acc >= step && n < 12){ game.tick(step); acc -= step; n++; }

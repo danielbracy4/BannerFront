@@ -1,5 +1,6 @@
 # Railway can build this from source without Docker installed locally.
-FROM node:22-alpine
+# 22.5+ for the built-in node:sqlite the ledger runs on.
+FROM node:24-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev

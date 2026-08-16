@@ -19,14 +19,60 @@ const CFG = {
   TRADE_VALUE:    340,     // per trade run delivered
 
   // --- war ---
-  ATTACK_RATE:    0.030,   // share of an attack's remaining levy spent per tick
-  ATTACK_FLOOR:   20,      // ...but at least this many per tick
-  TILE_RATE:      0.045,   // tiles converted per tick, as a share of front width.
-                           // The front therefore advances ~0.45 tiles of depth a
-                           // second whatever its length — slow enough to watch,
-                           // and slow enough that a defender can answer it.
+  ATTACK_RATE:    0.055,   // share of an attack's remaining levy spent per tick
+  ATTACK_FLOOR:   30,      // ...but at least this many per tick
+  TILE_RATE:      0.11,    // tiles converted per tick, as a share of front width.
+                           // Has to stay well clear of TILE_FLOOR across the
+                           // usual range of front widths, or the floor becomes
+                           // the real allowance and the host multiplier below
+                           // does nothing: at 0.065 with a floor of 3, hosts of
+                           // 1000, 2000 and 4000 men all advanced at exactly
+                           // 30 tiles a second.
   TILE_FLOOR:     2,       // a narrow front still creeps forward
-  NEUTRAL_COST:   24,      // levy per tile of open ground...
+  // A host does not fight on foot alone. Horse, baggage and sheer numbers let a
+  // great army push a front in several places at once, so the advance scales
+  // with the size of what was sent — square-root, not linear, so doubling the
+  // host is worth something without making one doomstack unanswerable.
+  // Without this the tile allowance is a hard ceiling at ~front width: measured
+  // before the change, 8000 men and 16000 men took ground at nearly the same
+  // rate, so everything above a middling host bought a longer war rather than a
+  // faster one.
+  HOST_REF:       1000,    // the host that advances at exactly TILE_RATE
+  HOST_CAP:       4,       // ...and no host moves more than this much faster
+
+  // --- the battle for a field ---
+  // Every field taken *from another lord* is a small battle, and both sides
+  // roll for it. Arming is what loads the dice: each 5% of arms-per-soldier is
+  // worth 0.05, up to 1.00 for a fully equipped host — so a full armoury rolls
+  // d1+1.00 against a rabble's d1+0.30. The gap between the rolls decides how
+  // one-sided the exchange was: both sides bleed for it, and the field only
+  // changes hands if the attacker wins. Open ground has no other side, so it is
+  // claimed rather than fought for — otherwise the opening scramble would be
+  // decided by coin flips against nobody.
+  ROLL_STEP:      0.05,    // advantage per 5% of arming
+  ROLL_CAP:       1.00,    // ...and no more than this
+  ROLL_SWING:     0.50,    // how hard the gap swings the casualties either way
+  ROLL_REPULSE:   0.60,    // a field the attacker lost is retried behind the
+                           // rest of the contour, at this much of its cost —
+                           // a repulsed assault probes elsewhere along the line
+                           // rather than battering the same field for ever
+
+  // --- settlement ---
+  // Claiming open ground is not a battle, so it should not cost blood like one.
+  // The levy spent on an empty field mostly *settles* it: those men leave the
+  // host and come home as civilians on the new land, and only a small share is
+  // truly lost to the wilderness. The attack still spends its committed men at
+  // the same rate — that spend is what meters how fast a realm can claim, and
+  // removing it re-created the exponential land grab — but the realm keeps the
+  // people. What conquest of empty land costs you is *soldiers*: settlers must
+  // be mustered back into the host, and mustering is paid in ducats.
+  SETTLE_LOSS:    0.15,    // share of the levy truly lost per open field
+  NEUTRAL_COST:   15,      // levy per tile of open ground...
+                           // At 24 a host bought about sixteen fields of plain
+                           // per thousand men, so a levy of five hundred took
+                           // thirty fields and was gone inside five seconds —
+                           // the advance was quick and the *ground* was still
+                           // slow, which is what "claiming is too slow" meant.
   NEUTRAL_BASE:   0.62,    // ...at your first holdings, and rising from there:
   NEUTRAL_SCALE:  850,     // + NEUTRAL_COST per this many fields already held,
   NEUTRAL_CAP:    2.0,     // never past this. Uncapped, a large realm could not
@@ -69,6 +115,16 @@ const CFG = {
   TERRAIN_DEF:    [1, 1, 1.0, 1.30, 1.60, 2.4], // sea shallow plain wood hill peak
 
   WIN_PCT:        0.65,
+
+  // --- the calendar ---
+  // Match time is read as years, not as a stopwatch: the first banner goes up
+  // in 1300 and a match of ordinary length runs to the middle of the next
+  // century. House names are drawn from whatever year the realm has reached,
+  // so the calendar is a rule, not decoration — it lives here rather than in
+  // the client so the server, the client and the harnesses all date a match
+  // the same way.
+  EPOCH_YEAR:     1300,
+  YEAR_SECS:      12,      // seconds of match time to the year
 };
 
 const T_SEA = 0, T_SHOAL = 1, T_PLAIN = 2, T_WOOD = 3, T_HILL = 4, T_PEAK = 5;
@@ -141,16 +197,64 @@ const ECON = {
 
   TRAIN_TIME:       42,     // seconds for a levy to become a soldier
   DEMOB_RETURN:     0.6,    // share of arms recovered when disbanding
+
+  // Every lord has a peasant levy standing whether they ordered one or not —
+  // the fields empty when the horn blows. It is free because it is barely an
+  // army. Raising anything *above* it is a muster, and a muster is bought man
+  // by man, in coin, as it happens. That is what stops mobilisation being a
+  // slider with nothing behind it: a realm that cannot pay cannot raise the
+  // men however loudly it orders them, so the choice to go to war competes
+  // directly with everything else coin buys.
+  PEASANT_LEVY:     0.08,   // share of the population always under arms
+  MUSTER_COST:      0.85,   // ducats to raise one man above the peasant levy
+  DRAFT_RATE:       0.25,   // share of the shortfall drafted per second
+  // A muster draws on the treasury at a *rate*, never to the bottom of it.
+  // Spending every ducat as it arrived pinned a mobilised realm at zero for the
+  // rest of the match: the ordered size scales with population, population
+  // keeps growing, so the order is never satisfied and the drain never ends —
+  // a lord who touched the slider once could not afford a 340c farm again.
+  // Drawing a share lets the treasury settle where income meets the muster. A
+  // rich realm raises men quickly, a poor one slowly, and both keep something
+  // to build with.
+  // Share of the treasury a muster may spend a second. At 0.30 the muster ate
+  // so much of the purse that lords stopped building: measured over fifteen
+  // minutes, halving it to 0.15 left them with 5,242 ducats in hand against
+  // 3,262, 118 works each against 103, and *fewer* starving (17% against 20%),
+  // because a slower muster leaves more hands in the fields. Note that removing
+  // the cost altogether is worse again — 28% starving — since nothing then
+  // throttles how fast a lord can empty its own farms into an army.
+  MUSTER_DRAW:      0.15,
+
+  // Going to war is a thing you prepare for, not a thing you decide. A lord
+  // will not open a war on another lord until all three are true: the men are
+  // called up and have come in, there are arms for them, and there is coin in
+  // hand to keep them in the field. Claiming *open* ground asks none of this —
+  // empty land has no defenders, and gating the opening scramble behind a war
+  // chest would simply stop the map ever being settled.
+  WAR_MOBIL:        0.50,   // what a lord orders when it means to fight
+  // Measured: at 0.80 arms-per-soldier the forges were the long pole and the
+  // map sat still from minute 7 to minute 14 with thirty-odd lords all waiting
+  // on kit. 0.66 is still emphatically armed — a wholly unequipped host fights
+  // at UNARMED (0.30), and this one fights at about 0.77 of full strength.
+  WAR_EQUIP:        0.66,   // arms per soldier before it will march on a lord
+  WAR_CHEST:        250,    // ducats it wants in hand before opening a war
+  WAR_HOST:         0.10,   // share of its people it wants under arms first
+  WAR_LOOMS:        0.72,   // claimed share of the map at which realms start arming
+  ARMING:           0.40,   // ...and how much of a war footing that is worth
+
+  SEA_NEWS_EVERY:   20,     // seconds between reports of other lords' sea fights
 };
 
-// Four ways to run a realm. These are the AI's priorities, and the balance
-// question the harness exists to answer: none of them should dominate.
-const ARCHETYPES = {
-  mercantile:   { w:{farm:0.28, forge:0.14, trade:0.50, works:0.08}, standing:0.06, mobil:0.45 },
-  military:     { w:{farm:0.34, forge:0.30, trade:0.24, works:0.12}, standing:0.22, mobil:0.70 },
-  industrial:   { w:{farm:0.30, forge:0.46, trade:0.16, works:0.08}, standing:0.10, mobil:0.60 },
-  agricultural: { w:{farm:0.56, forge:0.18, trade:0.18, works:0.08}, standing:0.07, mobil:0.65 },
-};
+// There are no doctrines. A lord is not born mercantile or military; every
+// realm runs the same way and the only question that separates them is whether
+// they are *ready* to fight. Preparing for a war is the decision: order the
+// mobilisation, pay to raise the men, forge arms for them, and keep enough coin
+// to see it through. A lord that marches without doing all three is throwing
+// its people away, and now knows it.
+//
+// Fixed archetypes never delivered the trade-offs they promised anyway — one of
+// the four won every match, before and after the levy was priced.
+const START_W = { farm:0.40, forge:0.24, trade:0.26, works:0.10 };
 
 // A siege is laid, not launched. Each of these is a camp raised on your own
 // frontier that invests the ground in front of it: walls come down, the
@@ -231,21 +335,90 @@ class Heap {
 }
 
 // ------------------------------------------------------------------ heraldry
-const HOUSE_A = ['Val','Mar','Cor','Dun','Bran','Eld','Grim','Hal','Ker','Loth','Mor','Nor',
-  'Oster','Pell','Ravon','Sar','Thorn','Ulf','Vane','Wold','Ash','Black','Storm','Fen','Gray',
-  'Har','Ised','Jor','Kald','Lys','Mer','Ost','Bry','Cas','Dral','Ean'];
-const HOUSE_B = ['mont','wyn','dor','holt','march','ford','vale','crag','mere','stead','burn',
-  'gard','stone','ridge','fell','hall','wick','moor','shire','watch','reach','helm','bury','cliff'];
-const TITLES = ['House','House','House','the','Clan','the','House','the'];
-const REALMS = ['Kingdom of','Duchy of','March of','Free City of','County of','Barony of','Principality of'];
+// A house is named for where it sits and for when it rose. Both halves matter:
+// one undifferentiated word-pool gave a Rhineland count and a Castilian one the
+// same invented syllables, and gave a lord of 1300 the same title as one of
+// 1460 — by which time half the counties of Europe had been swallowed by the
+// crowns that named themselves after them.
+const STOCK = {
+  insular:   { a:['Ash','Black','Raven','Thorn','Bram','Harl','Ken','Dun','Kil','Inver','Glen','Strath','Wold','Mor'],
+               b:['worth','ford','bury','combe','shire','wick','mere','dale','ness','garth','more','rick','holt'] },
+  iberian:   { a:['Cast','Alca','Mont','Vill','Pen','Torr','Salv','Mira','Val','Ribe','Sant','Guad','Bel'],
+               b:['illa','alba','ejo','ares','uela','osa','ada','eira','orte','anca','eda','ejar'] },
+  frankish:  { a:['Beau','Mont','Chat','Ville','Roche','Cler','Vaux','Bel','Cour','Aube','Fer','Aur'],
+               b:['mont','fort','champ','ville','court','val','lieu','bourg','rand','ray','gny','eres'] },
+  italian:   { a:['Monte','Castel','Villa','Rocc','Alta','Bella','Poggi','Camp','Vald','Colle','Fior','Sasso'],
+               b:['alto','vecchio','nuovo','forte','rosso','bello','grande','ferro','lungo','secco','marino'] },
+  germanic:  { a:['Falken','Rosen','Lowen','Hohen','Wolfs','Eisen','Grun','Schwarz','Stern','Adler','Berg','Reichen'],
+               b:['berg','burg','stein','feld','walde','heim','bach','thal','horst','fels','au','rode'] },
+  norse:     { a:['Bjarn','Hald','Sten','Ulf','Thor','Skag','Val','Nord','Vin','Hrafn','Aske','Fjell'],
+               b:['stad','vik','fjord','holm','berg','heim','strand','naes','lund','dal','borg','oy'] },
+  slavic:    { a:['Bela','Novo','Zvon','Rado','Cherni','Vysh','Krasno','Miro','Gorod','Vlad','Pere','Zbor'],
+               b:['grad','gora','polye','mir','slav','ovo','itsa','vets','ynia','sk','bor'] },
+  magyar:    { a:['Var','Feher','Nagy','Kis','Somo','Zala','Csan','Bekes','Bihar','Tolna','Szek'],
+               b:['var','hely','falva','sag','hida','mar','to','vesd'] },
+  greek:     { a:['Palaio','Neo','Kastro','Mega','Chryso','Hagio','Thermo','Amphi','Kalli','Xero'],
+               b:['kastron','polis','choria','limni','vouni','pyrgos','nisos','vrysi'] },
+  anatolian: { a:['Kara','Ak','Kizil','Sari','Demir','Gok','Alt','Yeni','Eski','Boz'],
+               b:['han','kale','su','dag','ova','pinar','bey','oglu','yurt'] },
+  maghrebi:  { a:['Beni','Ait','Ouled','Sidi','Tafi','Zaw','Meri','Ham','Tlem','Kser'],
+               b:['lalt','mane','rout','wan','zir','dad','rif','sen','ada'] },
+};
 
-function makeHouseName(rand){
-  const stem = HOUSE_A[(rand() * HOUSE_A.length) | 0] + HOUSE_B[(rand() * HOUSE_B.length) | 0];
+// Which stock a seat draws on. Deliberately rough: these are bands of influence
+// rather than borders, and there are no borders on the map to consult.
+// Order matters as much as the bounds here: the isles are tested before the
+// north, or Scotland comes out Norse, and the Hungarian plain before the Rus,
+// or it comes out Slavic.
+function regionAt(lon, lat){
+  if (lat < 36.6) return 'maghrebi';
+  if (lon > 25.5 && lat < 42.5) return 'anatolian';
+  if (lon > 18.5 && lat < 41.0) return 'greek';
+  if (lon < 2.0 && lat > 49.5) return 'insular';
+  if (lat > 55.5 && lon < 26) return 'norse';   // bounded east, or Novgorod turns Norse
+  if (lon >= 16.5 && lon < 23.5 && lat >= 44.5 && lat < 49.5) return 'magyar';
+  if (lon >= 14.5 && lat < 45.5) return 'slavic';   // the Balkans
+  if (lon >= 17) return 'slavic';                   // Poland and the Rus
+  if (lon < 3.5 && lat < 44.5) return 'iberian';
+  if (lon >= 6.5 && lat < 46.5) return 'italian';
+  if (lon < 7.5) return 'frankish';
+  return 'germanic';
+}
+
+// Titles move with the century. The fourteenth opens on a patchwork of
+// lordships and counties and closes on duchies and free companies; by the
+// fifteenth the survivors are crowns and grand duchies. That is the arc the
+// real powers took, and it is why the year the house rose is worth carrying.
+const ERAS = [
+  { until: 1340, of: ['Barony of','Lordship of','County of','March of','Viscounty of','Honour of'],
+                 bare: ['House','House','Clan'] },
+  { until: 1380, of: ['County of','March of','Duchy of','Lordship of','Bishopric of'],
+                 bare: ['House','House','the'] },
+  { until: 1420, of: ['Duchy of','County of','Free City of','Signoria of','Company of'],
+                 bare: ['House','the','the'] },
+  { until: 9999, of: ['Kingdom of','Grand Duchy of','Duchy of','Republic of','Crown of','Principality of'],
+                 bare: ['House','the'] },
+];
+
+const pickOf = (rand, arr) => arr[(rand() * arr.length) | 0];
+
+// `where` is a [lon, lat] seat and `year` the year the house rose. Both are
+// optional — the other map presets have no geography to speak of, so they fall
+// back to a spread across every stock.
+function makeHouseName(rand, where, year){
+  const key = where ? regionAt(where[0], where[1])
+                    : Object.keys(STOCK)[(rand() * Object.keys(STOCK).length) | 0];
+  const st = STOCK[key];
+  const stem = pickOf(rand, st.a) + pickOf(rand, st.b);
+  const era = ERAS.find(e => (year || CFG.EPOCH_YEAR) < e.until) || ERAS[ERAS.length - 1];
+  const cap = stem[0].toUpperCase() + stem.slice(1);
   const r = rand();
-  if (r < 0.5)  return 'House ' + stem[0].toUpperCase() + stem.slice(1);
-  if (r < 0.72) return REALMS[(rand() * REALMS.length) | 0] + ' ' + stem[0].toUpperCase() + stem.slice(1);
-  if (r < 0.86) return 'the ' + stem[0].toUpperCase() + stem.slice(1) + ' Host';
-  return 'Clan ' + stem[0].toUpperCase() + stem.slice(1);
+  if (r < 0.46) return pickOf(rand, era.of) + ' ' + cap;
+  if (r < 0.80){
+    const t = pickOf(rand, era.bare);
+    return t === 'the' ? 'the ' + cap + ' Host' : t + ' ' + cap;
+  }
+  return 'House ' + cap;
 }
 
 function hslHex(h, s, l){
@@ -277,62 +450,148 @@ const PALETTE = (() => {
 // out ragged rather than showing the straight edges of the polygons.
 const EU = {
   lon0: -12, lon1: 42, lat0: 34.0, lat1: 71.5,
+  // Coastlines are traced at roughly a degree or finer through the headlands
+  // and gulfs that give a country its silhouette — the boot of Italy with a
+  // real heel and toe, Brittany, Cornwall and the Wash, the Adriatic, the
+  // Aegean, the Gulf of Bothnia. Coarser outlines than this are what made the
+  // map read as a set of polygons rather than as Europe: a fourteen-point
+  // Iberia has a dead-straight south coast whatever noise is laid over it,
+  // because the warp displaces a long edge coherently instead of breaking it.
   land: [
-    // Iberia
-    [[-9.5,43.8],[-4.5,43.6],[-1.8,43.4],[0.9,41.2],[3.3,41.9],[0.7,40.6],[-0.3,39.4],[-0.9,37.6],
-     [-2.2,36.7],[-5.6,36.0],[-7.4,37.2],[-9.3,38.4],[-9.6,39.4],[-8.9,41.9]],
-    // the Pyrenean march — same gap the Alps had, between Iberia and France
-    [[-1.95,43.5],[0.9,42.95],[3.3,42.5],[3.25,41.8],[0.75,41.1],[-1.85,43.2]],
-    // France, the Low Countries and the Rhine
-    [[-4.8,48.4],[-1.5,49.7],[1.6,51.0],[4.3,51.6],[6.0,52.0],[6.2,50.5],[7.6,49.0],[7.6,47.6],
-     [6.0,46.2],[7.0,44.0],[5.5,43.2],[3.0,43.0],[0.9,42.8],[-1.8,43.4],[-1.2,45.8],[-2.2,47.2]],
-    // Germany, Poland, Bohemia, Austria, Hungary
-    [[6.0,52.0],[7.0,53.6],[8.5,54.9],[10.0,54.4],[12.0,54.5],[14.3,54.0],[16.5,54.6],[19.0,54.4],
-     [21.0,54.4],[23.5,54.0],[23.9,52.1],[24.2,50.6],[23.3,49.3],[22.6,48.5],[22.9,47.9],[21.5,46.2],
-     [19.6,45.9],[17.0,45.8],[16.0,46.5],[13.7,46.5],[12.4,46.6],[11.0,47.0],[9.6,47.5],[7.6,47.6],
-     [7.6,49.0],[6.2,50.5]],
-    // Ruthenia and the western Rus
-    [[23.5,54.0],[26.0,55.8],[28.2,57.2],[30.5,59.2],[33.0,59.8],[36.0,59.0],[40.0,57.6],[42.0,55.0],
-     [42.0,50.0],[40.0,48.0],[38.0,47.2],[36.0,46.5],[33.5,46.2],[32.0,46.6],[30.5,46.0],[28.5,45.4],
-     [28.8,47.0],[26.6,48.3],[24.0,50.5],[23.9,52.1]],
-    // the Balkans and Greece
-    [[16.0,46.5],[19.6,45.9],[21.5,46.2],[22.9,47.9],[25.0,45.5],[27.5,44.2],[28.6,43.7],[27.5,42.1],
-     [26.5,41.3],[24.0,40.6],[23.5,40.2],[23.0,39.0],[23.7,38.0],[23.0,36.4],[22.0,37.0],[21.3,37.7],
-     [20.9,39.0],[19.4,40.3],[19.0,41.8],[18.0,42.7],[16.5,43.4],[15.2,44.3],[13.6,45.5]],
-    // the Alpine arc — bridges the gap between the German lands and Italy
-    [[5.9,46.3],[7.5,47.6],[10.0,47.7],[13.6,46.9],[13.4,45.6],[11.0,45.7],[8.0,45.0],[6.4,45.1]],
-    // Italy
-    [[7.6,44.1],[9.2,45.5],[11.0,45.6],[12.4,45.5],[13.6,44.9],[14.2,42.6],[15.2,41.9],[16.5,41.9],
-     [18.0,40.7],[18.5,40.1],[17.9,39.9],[16.9,39.5],[17.1,38.9],[16.0,37.9],[15.6,38.2],[15.8,40.0],
-     [14.0,40.8],[13.0,41.2],[11.2,42.4],[10.5,43.0],[9.8,44.0],[8.8,44.4]],
-    // Great Britain
-    [[-5.0,58.6],[-3.0,58.6],[-2.0,57.5],[-1.8,56.0],[-1.5,54.5],[0.3,53.5],[1.7,52.7],[1.0,51.4],
-     [0.5,50.8],[-2.0,50.6],[-4.2,50.3],[-5.7,50.1],[-4.5,51.6],[-3.0,51.5],[-3.0,53.3],[-4.8,53.4],
-     [-4.0,54.9],[-5.0,55.9],[-5.6,57.0]],
+    // Iberia — Biscay coast, the Mediterranean down to Tarifa, the Atlantic back up
+    [[-9.30,42.90],[-8.85,43.33],[-8.30,43.55],[-7.10,43.75],[-5.85,43.65],[-4.50,43.45],
+     [-3.15,43.50],[-1.90,43.45],[-1.60,43.38],[0.90,42.72],[2.10,42.45],[3.28,42.32],
+     [3.15,41.90],[2.20,41.40],[1.20,41.10],[0.87,40.72],[0.55,40.55],[0.20,40.10],
+     [-0.30,39.50],[0.19,38.73],[-0.50,38.30],[-0.65,37.95],[-1.00,37.57],[-1.80,37.20],
+     [-2.50,36.83],[-3.40,36.72],[-4.42,36.72],[-5.35,36.15],[-5.60,36.00],[-6.30,36.55],
+     [-6.90,37.20],[-7.40,37.18],[-7.90,36.98],[-8.80,37.02],[-8.99,37.02],[-8.85,37.90],
+     [-8.80,38.45],[-9.15,38.70],[-9.48,38.78],[-9.35,39.35],[-9.05,39.75],[-8.87,40.15],
+     [-8.75,40.65],[-8.65,41.15],[-8.85,41.90],[-9.20,42.55]],
+    // France — Roussillon and Provence, the Alpine and Rhine frontiers, Flanders,
+    // then the Channel, Brittany and the Bay of Biscay
+    [[3.05,42.45],[3.10,43.08],[4.20,43.45],[5.35,43.30],[6.00,43.08],[6.95,43.42],
+     [7.55,43.78],[7.10,44.20],[6.80,44.90],[7.00,45.50],[6.80,46.05],[6.10,46.20],
+     [6.20,46.80],[7.00,47.35],[7.60,47.60],[7.80,48.60],[8.20,49.00],[6.35,49.50],
+     [6.10,50.15],[5.00,51.45],[3.70,51.40],[2.55,51.10],[1.85,50.95],[1.55,50.35],
+     [0.70,49.90],[0.10,49.50],[-1.15,49.38],[-1.60,49.65],[-1.25,49.25],[-1.60,48.65],
+     [-2.60,48.55],[-3.50,48.85],[-4.30,48.70],[-4.75,48.40],[-4.35,48.05],[-3.20,47.75],
+     [-2.55,47.50],[-2.15,47.28],[-1.75,46.98],[-1.20,46.30],[-1.15,45.65],[-1.25,44.65],
+     [-1.55,43.48],[-1.60,43.38],[0.90,42.72],[2.10,42.45]],
+    // The German lands, Bohemia, Poland and Hungary — the North Sea and Baltic
+    // coasts in front, the Carpathian and Alpine rim behind
+    [[6.10,50.15],[5.00,51.45],[4.10,51.95],[4.75,52.95],[5.60,53.30],[6.50,53.40],
+     [7.20,53.35],[8.10,53.55],[8.50,53.90],[8.70,54.00],[9.00,54.50],[8.60,55.00],
+     [9.40,54.82],[10.10,54.35],[10.90,53.90],[12.10,54.20],[13.40,54.40],[14.60,53.90],
+     [15.60,54.20],[16.80,54.55],[18.70,54.35],[19.60,54.42],[20.50,54.70],[21.10,55.70],
+     [21.00,56.50],[22.30,57.10],[23.50,56.95],[24.20,56.20],[23.90,54.90],[23.60,54.00],
+     [23.90,52.10],[24.20,50.60],[23.30,49.30],[22.60,48.50],[22.90,47.90],[21.50,46.20],
+     [19.60,45.90],[17.00,45.80],[16.00,46.50],[13.70,46.50],[12.40,46.60],[11.00,47.00],
+     [9.60,47.50],[7.60,47.60],[7.80,48.60],[8.20,49.00],[6.35,49.50]],
+    // Ruthenia and the western Rus — the Gulf of Finland, Ladoga's country, the
+    // steppe down to the Black Sea and the Sea of Azov
+    [[23.60,54.00],[23.90,54.90],[24.20,56.20],[23.50,56.95],[24.50,57.60],[26.00,57.55],
+     [27.50,57.55],[28.20,58.30],[28.00,59.35],[29.50,59.90],[31.00,60.20],[33.00,60.00],
+     [36.00,59.20],[39.00,58.20],[41.00,57.20],[42.00,55.60],[42.00,51.00],[41.00,48.60],
+     [39.50,47.60],[38.30,47.15],[37.50,47.05],[36.60,46.60],[35.20,46.20],[34.00,46.15],
+     [33.50,46.20],[32.10,46.55],[31.20,46.60],[30.50,46.05],[29.70,45.35],[28.75,45.25],
+     [28.60,46.00],[28.20,46.90],[26.60,48.30],[24.90,49.60],[24.00,50.50],[23.90,52.10]],
+    // The Balkans and Greece — Dalmatia down the Adriatic, the Peloponnese, the
+    // Aegean shore and the Bosphorus approach
+    [[16.00,46.50],[19.60,45.90],[21.50,46.20],[22.90,47.90],[25.00,45.50],[26.60,44.30],
+     [27.90,44.05],[28.65,43.75],[28.20,43.40],[27.90,42.70],[28.10,41.95],[28.85,41.25],
+     [29.15,41.15],[28.85,40.85],[28.20,40.82],[27.40,40.80],[26.80,40.62],[26.30,40.58],
+     [26.00,40.75],[25.20,40.90],[24.30,40.80],[23.70,40.55],[23.35,40.25],[22.95,40.50],
+     [22.60,40.35],[23.00,39.90],[23.35,39.20],[23.55,38.55],[24.10,38.35],[24.05,38.02],
+     [24.03,37.68],[23.75,37.88],[23.50,37.98],[23.15,37.88],[23.05,37.70],
+     [23.20,37.45],[22.75,37.00],[23.10,36.42],[22.50,36.75],[22.00,36.90],
+     [21.70,37.15],[21.30,37.65],[21.15,38.30],[20.75,38.85],[20.90,39.60],[19.95,40.10],
+     [19.40,40.35],[19.30,41.30],[18.90,41.85],[18.10,42.65],[17.20,43.05],[16.20,43.45],
+     [15.30,44.15],[14.55,44.90],[13.90,45.40],[13.60,45.55]],
+    // Italy — the Ligurian arc, the Tyrrhenian coast, the toe and the heel with
+    // the Gulf of Taranto between them, the Gargano spur, and the Po to Venice
+    [[7.55,43.90],[8.25,44.35],[9.20,44.30],[9.85,44.05],[10.30,43.85],[10.55,43.35],
+     [10.30,42.95],[11.20,42.40],[11.80,42.10],[12.25,41.75],[13.05,41.25],[13.75,41.25],
+     [14.05,40.92],[14.30,40.75],[14.60,40.60],[14.95,40.25],[15.30,40.05],[15.65,39.95],[16.00,39.40],
+     [16.55,38.95],[16.10,38.65],[15.65,38.25],[15.90,37.95],[16.55,38.55],[17.15,38.95],
+     [17.20,39.45],[16.85,39.65],[16.55,39.80],[17.20,40.45],[17.95,40.65],[18.50,40.15],
+     [18.35,39.80],[17.90,40.50],[17.20,40.90],[16.20,41.40],[15.90,41.65],[16.20,41.90],
+     [15.60,41.90],[15.15,41.95],[14.85,42.20],[14.05,42.65],[13.55,43.60],[12.90,44.05],
+     [12.25,44.25],[12.35,44.85],[12.50,45.45],[13.60,45.80],[13.75,45.60],[13.00,45.60],
+     [11.80,45.65],[10.60,45.70],[9.30,45.85],[8.10,45.95],[7.00,45.55],[6.90,44.80]],
+    // Great Britain — Cornwall, the Bristol Channel, Wales, the Solway, the
+    // Highlands, the east coast down past the Wash to Kent
+    [[-5.72,50.07],[-4.20,50.35],[-3.55,50.62],[-2.45,50.62],[-1.95,50.72],[-1.10,50.78],
+     [-0.30,50.82],[0.55,50.87],[1.42,51.10],[1.30,51.80],[1.75,52.48],[1.75,52.98],
+     [0.35,53.10],[0.10,53.55],[-0.20,54.10],[-0.55,54.50],[-1.15,54.65],[-1.35,55.05],
+     [-1.60,55.60],[-2.10,56.05],[-2.60,56.05],[-3.10,56.15],[-2.75,56.45],[-2.45,56.75],
+     [-2.10,57.20],[-1.85,57.60],[-2.60,57.70],[-3.50,57.85],[-4.00,57.90],[-3.80,58.60],
+     [-4.75,58.60],[-5.10,58.25],[-5.30,57.85],[-5.75,57.55],[-5.60,57.10],[-5.80,56.60],
+     [-5.65,56.10],[-5.35,55.85],[-4.80,55.35],[-4.90,54.85],[-3.60,54.90],[-3.05,54.20],
+     [-3.10,53.40],[-4.15,53.35],[-4.55,53.30],[-4.10,52.90],[-4.10,52.50],[-4.35,52.20],
+     [-4.75,51.75],[-5.25,51.72],[-4.30,51.55],[-3.40,51.40],[-3.00,51.25],[-3.55,51.02],
+     [-4.20,50.95],[-5.05,50.60]],
     // Ireland
-    [[-10.0,54.3],[-8.0,55.3],[-6.0,55.2],[-5.9,54.0],[-6.2,52.2],[-8.0,51.5],[-9.9,51.6],[-10.3,53.4]],
-    // Norway and Sweden
-    [[4.5,58.1],[5.5,60.5],[7.5,63.0],[11.0,64.5],[14.0,66.5],[18.0,68.5],[21.0,70.0],[25.0,71.1],
-     [28.0,70.5],[30.5,69.7],[27.0,68.5],[24.0,66.0],[21.5,64.0],[19.2,63.0],[18.3,61.0],[19.4,59.6],[17.2,58.4],
-     [16.6,57.0],[14.5,55.4],[12.6,56.2],[11.5,58.5],[8.0,58.2]],
+    [[-6.05,55.25],[-5.45,54.75],[-5.55,54.25],[-6.05,53.90],[-6.15,53.35],[-6.05,52.80],
+     [-6.35,52.25],[-7.55,52.05],[-8.30,51.75],[-9.45,51.55],[-10.15,51.65],[-9.90,52.15],
+     [-9.70,52.60],[-9.05,53.15],[-10.05,53.45],[-9.90,54.00],[-8.65,54.30],[-8.30,54.65],
+     [-7.35,55.10],[-6.95,55.25]],
+    // Norway and Sweden — the western fjords, the North Cape, and the Baltic
+    // side down through Skåne with the Gulf of Bothnia cut in behind
+    [[4.95,58.10],[5.20,59.20],[5.10,60.10],[6.20,60.60],[5.90,61.20],[7.00,62.10],
+     [8.10,62.60],[9.60,63.40],[11.20,64.20],[12.60,65.20],[14.00,66.30],[15.50,67.40],
+     [17.20,68.10],[19.00,69.00],[21.00,70.00],[23.00,70.60],[25.00,71.10],[27.00,71.00],
+     [28.50,70.90],[30.50,69.75],[29.00,69.60],[27.00,68.50],[24.00,66.00],[22.20,65.80],
+     [21.50,64.00],[19.20,63.00],[17.40,62.00],[18.30,61.00],[17.60,60.30],[18.60,59.50],
+     [17.20,58.80],[16.60,57.00],[15.00,56.10],[14.50,55.40],[13.00,55.40],[12.60,56.20],
+     [11.90,57.30],[11.20,58.30],[10.60,59.10],[9.60,58.90],[8.00,58.15],[6.60,58.10]],
     // Finland and Karelia
-    [[21.5,64.0],[24.0,65.8],[27.0,68.0],[29.5,69.5],[31.0,68.0],[30.0,66.0],[31.5,64.0],[31.0,62.0],
-     [28.0,60.5],[25.0,60.0],[22.5,60.3],[21.0,62.0]],
-    // Jutland
-    [[8.1,54.9],[8.0,57.1],[10.6,57.7],[10.8,56.0],[9.9,54.8]],
-    // Anatolia
-    [[26.0,40.2],[29.0,41.2],[33.0,42.0],[36.0,41.7],[40.0,41.5],[42.0,41.4],[42.0,37.5],[40.0,37.0],
-     [36.0,36.0],[32.5,36.2],[30.0,36.3],[28.0,36.7],[26.3,38.4]],
-    // the Maghreb coast
-    [[-6.0,35.9],[-2.0,35.5],[3.0,36.9],[8.0,37.1],[11.0,37.2],[11.5,33.4],[5.0,34.0],[-2.0,33.8],[-6.0,33.6]],
-    // Crimea
-    [[33.5,46.2],[36.6,45.4],[35.4,44.4],[33.4,44.4],[32.5,45.3]],
+    [[21.50,64.00],[22.20,65.80],[24.00,66.00],[27.00,68.50],[29.00,69.60],[30.50,69.75],
+     [31.50,68.30],[30.20,66.20],[31.50,64.20],[31.00,62.00],[28.50,61.00],[27.50,60.40],
+     [25.00,60.00],[23.00,59.85],[21.30,60.50],[21.10,62.20]],
+    // Jutland, and the Danish islands behind it
+    [[8.45,55.30],[8.15,56.20],[8.60,57.10],[9.60,57.60],[10.60,57.75],[10.40,56.90],
+     [10.20,56.15],[10.70,55.80],[10.00,55.30],[9.50,55.10],[9.40,54.82],[8.60,55.00]],
+    [[9.80,55.60],[10.70,55.55],[10.80,55.05],[9.90,55.02]],                // Funen
+    [[11.05,56.05],[12.15,56.12],[12.65,55.55],[12.10,55.00],[11.15,55.20]],// Zealand
+    // The Alpine arc and the Carpathian bow are land bridges as much as
+    // mountains: without them Italy is an island and Transylvania is open sea,
+    // which is precisely what the landmark check caught when these were
+    // dropped. Every neighbouring polygon shares vertices with them on purpose.
+    [[6.10,46.20],[6.80,46.05],[7.00,45.55],[8.10,45.95],[9.30,45.85],[10.60,45.70],
+     [11.80,45.65],[13.60,45.60],[13.70,46.50],[12.40,46.60],[11.00,47.00],[9.60,47.50],
+     [7.60,47.60],[6.20,46.80]],
+    [[22.60,48.50],[24.20,48.55],[26.60,48.30],[28.20,46.90],[28.60,46.00],[27.20,45.35],
+     [25.00,45.50],[22.90,47.90]],
+    // Anatolia — the Aegean coast with its gulfs, the Marmara, the Black Sea
+    // shore and the Cilician bight
+    [[26.20,40.15],[27.20,40.55],[28.30,40.45],[29.20,41.00],[29.10,41.25],[30.30,41.15],
+     [31.40,41.30],[33.30,42.05],[35.00,42.10],[36.20,41.70],[37.50,41.10],[39.00,41.10],
+     [40.50,41.30],[41.60,41.55],[42.00,41.40],[42.00,37.50],[40.00,37.00],[38.00,36.70],
+     [36.60,36.20],[35.90,36.60],[35.00,36.35],[34.00,36.30],[33.00,36.10],[32.00,36.25],
+     [31.00,36.30],[30.50,36.30],[30.20,36.90],[29.30,36.30],[28.80,36.65],[28.20,36.95],
+     [27.40,37.05],[27.20,37.60],[26.80,38.20],[27.20,38.60],[26.70,38.75],[26.90,39.35],
+     [26.20,39.55],[26.10,39.95]],
+    // The Maghreb coast — the Rif and Kabylia headlands, the Gulf of Gabès
+    [[-5.95,35.90],[-5.20,35.60],[-4.30,35.20],[-3.00,35.30],[-1.80,35.10],[-0.60,35.75],
+     [0.20,36.00],[1.50,36.55],[2.90,36.80],[4.60,36.90],[5.80,36.90],[6.90,37.10],
+     [8.20,37.05],[9.80,37.35],[10.30,37.20],[10.80,36.80],[10.60,36.10],[11.10,35.25],
+     [10.80,34.40],[10.10,33.80],[11.50,33.20],[9.50,33.10],[7.50,33.60],[5.00,34.00],
+     [2.00,33.70],[-1.00,33.60],[-3.50,33.70],[-5.30,34.20],[-6.10,34.80]],
+    // Crimea, and the Sea of Azov behind it
+    [[33.50,46.20],[35.20,46.20],[36.60,45.45],[35.90,45.00],[35.40,44.95],[34.70,44.75],
+     [33.60,44.40],[33.40,44.90],[32.50,45.35]],
     // islands
-    [[12.4,38.1],[15.6,38.3],[15.1,36.7],[12.4,37.8]],                     // Sicily
-    [[8.2,41.3],[9.8,41.2],[9.6,38.9],[8.4,39.0]],                         // Sardinia
-    [[8.6,43.0],[9.5,42.7],[9.4,41.4],[8.6,42.0]],                         // Corsica
-    [[23.5,35.6],[26.3,35.3],[26.0,34.9],[23.5,35.2]],                     // Crete
-    [[32.3,35.2],[34.6,35.7],[34.0,34.6],[32.5,34.6]],                     // Cyprus
+    [[12.45,37.80],[13.30,38.05],[14.40,38.05],[15.25,38.30],[15.65,38.25],[15.10,37.35],
+     [15.30,36.70],[14.50,36.80],[12.65,37.55]],                            // Sicily
+    [[8.20,41.10],[9.20,41.25],[9.80,40.90],[9.65,40.10],[9.60,39.15],[9.05,39.20],
+     [8.40,39.10],[8.45,40.00],[8.20,40.60]],                               // Sardinia
+    [[8.60,42.95],[9.35,42.70],[9.55,42.15],[9.40,41.40],[8.80,41.60],[8.65,42.30]],  // Corsica
+    [[23.55,35.55],[24.50,35.60],[25.75,35.35],[26.30,35.30],[25.70,35.00],[24.70,34.95],
+     [23.60,35.20]],                                                        // Crete
+    [[32.30,35.15],[33.60,35.35],[34.60,35.70],[34.05,34.95],[32.90,34.65],[32.35,34.75]], // Cyprus
+    [[24.80,40.65],[25.30,40.50],[24.90,40.35],[24.55,40.50]],              // Thasos
+    [[19.65,39.80],[20.10,39.65],[19.85,39.35],[19.60,39.55]],              // Corfu
+    [[-1.30,49.95],[-0.55,49.75],[-1.10,49.55],[-1.55,49.75]],              // the Channel Isles, loosely
   ],
   // mountain spines: polyline in degrees, plus how wide the range runs
   ranges: [
@@ -349,6 +608,18 @@ const EU = {
     { r:0.5, pts:[[-3.5,37.2],[-1.9,37.5]] },                              // Sierra Nevada
     { r:0.6, pts:[[2.0,45.2],[3.5,44.8]] },                                // Massif Central
     { r:0.5, pts:[[12.5,49.6],[15.5,49.9]] },                              // Bohemian rim
+    { r:0.55, pts:[[-5.2,57.2],[-4.2,57.0],[-3.6,56.8]] },                 // the Highlands
+    { r:0.30, pts:[[-2.35,54.6],[-2.05,53.5]] },                           // the Pennines
+    { r:0.30, pts:[[-4.0,53.05],[-3.5,52.3]] },                            // the Welsh mountains
+    { r:0.55, pts:[[20.9,39.9],[21.4,39.2],[22.0,38.6]] },                 // Pindus
+    { r:0.40, pts:[[23.8,41.6],[25.6,41.5]] },                             // Rhodope
+    { r:0.50, pts:[[19.9,43.4],[21.3,42.7],[22.2,42.3]] },                 // the Serbian highlands
+    { r:0.50, pts:[[33.5,41.1],[36.5,40.9],[39.5,40.7],[41.5,41.2]] },     // the Pontic range
+    { r:0.40, pts:[[-6.2,38.4],[-3.4,38.5]] },                             // Sierra Morena
+    { r:0.45, pts:[[-2.6,41.7],[-1.6,40.9],[-0.9,40.3]] },                 // the Iberian System
+    { r:0.35, pts:[[7.1,48.3],[8.2,48.1]] },                               // Vosges and the Black Forest
+    { r:0.35, pts:[[15.4,50.7],[17.2,50.2]] },                             // the Sudetes
+    { r:0.60, pts:[[-5.5,32.5],[-2.5,33.3],[1.0,35.2],[5.0,36.2],[7.5,36.4]] },  // the Atlas
   ],
 };
 
@@ -416,8 +687,9 @@ class Lord {
     this.food = 0; this.starving = false;
     this.jobs = { farm:0, forge:0, trade:0, works:0 };   // civilians actually employed
     this.w = { farm:0.40, forge:0.22, trade:0.28, works:0.10 };  // priorities
-    this.standing = 0.08;   // share of population kept as a professional army
-    this.mobil = 0;         // extra mobilisation ordered on top of that
+    this.standing = ECON.PEASANT_LEVY;  // the peasant levy, always under arms
+    this.mobil = 0;         // extra mobilisation ordered on top of it
+    this.mustered = 0;      // men being raised a second, and paid for
     this.tiles = 0; this.peak = 0; this.sumX = 0; this.sumY = 0;
     this.border = new Set();   // own land touching foreign/open land
     this.coast  = new Set();   // own land touching water
@@ -441,14 +713,12 @@ class Lord {
     this.aggr  = 0.25 + r() * 0.7;   // how readily it attacks
     this.greed = 0.25 + r() * 0.7;   // build vs. levy
     this.loyal = 0.2  + r() * 0.75;  // alliance behaviour
-    // ...and an economic doctrine, which decides how it runs its realm
-    const names = Object.keys(ARCHETYPES);
-    this.doctrine = names[(r() * names.length) | 0];
-    const A = ARCHETYPES[this.doctrine];
-    this.w = { farm:A.w.farm, forge:A.w.forge, trade:A.w.trade, works:A.w.works };
-    this.doctrineW = { farm:A.w.farm, forge:A.w.forge, trade:A.w.trade, works:A.w.works };
-    this.standing = A.standing;
-    this.warMobil = A.mobil;
+    // Every realm is run the same way. What differs is temperament above and
+    // whether it has troubled to get ready before it marches.
+    this.w = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
+    this.restW = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
+    this.standing = ECON.PEASANT_LEVY;
+    this.wantWar = false;   // preparing to fight: mobilised, arming, saving
   }
   get cx(){ return this.tiles ? this.sumX / this.tiles : 0; }
   get cy(){ return this.tiles ? this.sumY / this.tiles : 0; }
@@ -568,6 +838,13 @@ class Lord {
   costOf(type){ return Math.round(BUILDS[type].cost * Math.pow(BUILDS[type].step, this.bought[type])); }
 }
 
+// What a host's armoury is worth on the roll. Quantised to 5% steps so the
+// number a player reads in the panel — "40% armed" — maps to a figure they can
+// reason about: 0.40 on the die, against a full armoury's 1.00.
+function armAdvantage(p){
+  return Math.min(CFG.ROLL_CAP, Math.floor(p.equip / CFG.ROLL_STEP) * CFG.ROLL_STEP);
+}
+
 // ------------------------------------------------------------------ an assault
 // A running attack. Owns a frontier of enemy tiles ordered by terrain cost and
 // converts them one at a time until its levy is spent.
@@ -590,6 +867,14 @@ class Attack {
   // the advance a front: everything at one contour falls before anything past
   // it. Keying on a tile's own cost instead made this a greedy best-first
   // search that threaded through plains and stranded the hills behind it.
+  // Does this field touch ground the attacker actually holds?
+  touchesOwner(t){
+    const g = this.g, W = g.W, x = t % W, y = (t / W) | 0;
+    return (x > 0       && g.owner[t - 1] === this.owner)
+        || (x < W - 1   && g.owner[t + 1] === this.owner)
+        || (y > 0       && g.owner[t - W] === this.owner)
+        || (y < g.H - 1 && g.owner[t + W] === this.owner);
+  }
   probe(t, base){
     const g = this.g, W = g.W;
     const x = t % W, y = (t / W) | 0;
@@ -645,7 +930,8 @@ class Attack {
     // advance. A huge host funnelled through a narrow border still crawls.
     this.pool = Math.min(this.pool + Math.max(CFG.ATTACK_FLOOR, this.troops * CFG.ATTACK_RATE),
                          this.troops * 0.5 + 400);
-    let allow = Math.max(CFG.TILE_FLOOR, Math.ceil(this.heap.size * CFG.TILE_RATE
+    const host = Math.min(CFG.HOST_CAP, Math.max(1, Math.sqrt(this.troops / CFG.HOST_REF)));
+    let allow = Math.max(CFG.TILE_FLOOR, Math.ceil(this.heap.size * CFG.TILE_RATE * host
                           * (this._inSupply ? 1 : ECON.UNSUPPLIED_RATE)));
     let guard = 6000;
     while (allow > 0 && guard-- > 0){
@@ -657,18 +943,49 @@ class Attack {
       // tiles behind it never get queued and the advance leaves holes
       if (held === this.owner){ this.heap.pop(); this.probe(t, key); continue; }
       if (held !== this.target){ this.heap.pop(); continue; }        // stale
+      // A front has to stay attached to the realm behind it. A field is queued
+      // while it touches our ground, but the defender can retake that ground
+      // before we pop it — and without this the advance carried on converting
+      // fields deep inside the enemy with nothing joining them to us, which is
+      // what "attacking while they attack goes behind enemy lines" was. Drop it
+      // from `queued` too, so it can be picked up again if the front returns.
+      if (!this.touchesOwner(t)){ this.heap.pop(); this.queued.delete(t); continue; }
       const c = this.cost(t);
       if (c > this.troops){ this.finish(); return; }                 // spent
       if (c > this.pool) return;                                     // next tick
-      this.heap.pop();
-      this.troops -= c; this.pool -= c; allow--; this.taken++;
-      if (this.target >= 0){
-        const d = g.players[this.target];
-        g.bleed(d, c * CFG.DEF_LOSS);
-        d.grudge.set(this.owner, (d.grudge.get(this.owner) || 0) + 1.5);
+
+      // Open ground is claimed, not fought for: the men spent on it settle it
+      // and return to the realm as civilians, less a share lost to the march.
+      if (this.target < 0){
+        this.heap.pop();
+        this.troops -= c; this.pool -= c; allow--; this.taken++;
+        me.civ += c * (1 - CFG.SETTLE_LOSS);
+        g.setOwner(t, this.owner);
+        this.probe(t, key);
+        continue;
       }
-      g.setOwner(t, this.owner);
-      this.probe(t, key);
+
+      const d = g.players[this.target];
+      const gap = (g.rand() + armAdvantage(me)) - (g.rand() + armAdvantage(d));
+      const swing = Math.max(-1, Math.min(1, gap)) * CFG.ROLL_SWING;
+      // Both sides bleed, and the worse you lost the exchange the more it cost
+      // you. A narrow win is nearly as expensive as a narrow loss; a rout is
+      // cheap for the winner and ruinous for the loser.
+      const atkLoss = c * (1 - swing);
+      const defLoss = c * CFG.DEF_LOSS * (1 + swing);
+      this.troops -= atkLoss; this.pool -= atkLoss; allow--;
+      g.bleed(d, defLoss);
+      d.grudge.set(this.owner, (d.grudge.get(this.owner) || 0) + 1.5);
+
+      if (gap > 0){                       // the field falls
+        this.heap.pop();
+        this.taken++;
+        g.setOwner(t, this.owner);
+        this.probe(t, key);
+      } else {                            // thrown back — try further along
+        this.heap.pop();
+        this.heap.push(t, key + c * CFG.ROLL_REPULSE);
+      }
     }
   }
   finish(){
@@ -699,6 +1016,9 @@ class Game {
     this.winPct = this.preset === 'europe' ? 0.50 : CFG.WIN_PCT;
     this.N = this.W * this.H;
     this.time = 0; this.ticks = 0;
+    // The year the first banner goes up. A match can be set in any year, and
+    // the houses it raises are named for it.
+    this.startYear = o.year == null ? CFG.EPOCH_YEAR : o.year | 0;
     this.phase = 'place';                 // place -> war -> done
     this.players = []; this.humanId = -1;
     this.attacks = []; this.boats = []; this.sieges = []; this.caravans = [];
@@ -733,9 +1053,17 @@ class Game {
     for (let y = 0; y < H; y++){
       for (let x = 0; x < W; x++){
         const t = y * W + x;
-        // warp in degrees — about a third of a degree of wobble
-        const wx = (fbm(x / 26, y / 26, s + 17, 4, 0.5) - 0.5) * 0.9;
-        const wy = (fbm(x / 26, y / 26, s + 91, 4, 0.5) - 0.5) * 0.9;
+        // Warp the sample point in degrees, at two scales. The coarse one bends
+        // the coast into bays and headlands; the fine one frays it at tile
+        // scale, which is what actually kills the straight polygon edge — a
+        // single coarse warp displaces a long edge *coherently*, so it stays
+        // straight and merely leans. The coarse amplitude has to stay well
+        // under the width of the narrowest real feature: at 0.9° it punched
+        // clean through Italy and the Anatolian coast, both barely 2° wide.
+        const wx = (fbm(x / 26, y / 26, s + 17, 4, 0.5) - 0.5) * 0.42
+                 + (fbm(x /  7, y /  7, s + 23, 3, 0.5) - 0.5) * 0.26;
+        const wy = (fbm(x / 26, y / 26, s + 91, 4, 0.5) - 0.5) * 0.42
+                 + (fbm(x /  7, y /  7, s + 53, 3, 0.5) - 0.5) * 0.26;
         const lon = EU.lon0 + (x + 0.5) / W * spanLon + wx;
         const lat = EU.lat1 - (y + 0.5) / H * spanLat + wy;
 
@@ -765,12 +1093,17 @@ class Game {
 
         land++;
         // height from the nearest mountain spine
+        // A range whose width is constant along its length renders as a smooth
+        // lozenge — the "sausage" look. Wobble the reach so the spine swells
+        // into massifs and pinches into saddles, and the crest breaks up.
+        const wob = 0.72 + fbm(x / 13, y / 13, s + 700, 3, 0.55) * 0.56;
         let rise = 0;
         for (const rg of EU.ranges){
+          const reach = rg.r * 1.6 * wob;
           for (let j = 1; j < rg.pts.length; j++){
             const d = segDist(lon, lat, rg.pts[j-1][0], rg.pts[j-1][1], rg.pts[j][0], rg.pts[j][1]);
-            if (d < rg.r * 1.6){
-              const v = Math.max(0, 1 - d / (rg.r * 1.6));
+            if (d < reach){
+              const v = Math.max(0, 1 - d / reach);
               if (v > rise) rise = v;
             }
           }
@@ -1156,7 +1489,9 @@ class Game {
       const dx = bx - c.x, dy = by - c.y, d = Math.hypot(dx, dy);
       const step = ECON.CARAVAN_SPEED * dt;
       if (d <= step){
-        p.ducats += ECON.CARAVAN_VALUE * (1 + p.linkBonus);
+        const paid = ECON.CARAVAN_VALUE * (1 + p.linkBonus);
+        p.ducats += paid;
+        p.vanPaid = (p.vanPaid || 0) + paid;   // what the roads have actually earned
         c.dead = true;
       } else {
         c.x += dx / d * step; c.y += dy / d * step;
@@ -1284,15 +1619,31 @@ class Game {
           }
         } else if (prey.kind === 'galley'){
           prey.hp -= 26 * dt; g.hp -= 26 * dt;
-          if (prey.hp <= 0){ prey.dead = true; this.log(`${this.players[prey.owner].name} loses a war galley`, 'war', prey.owner); }
-          if (g.hp <= 0){ g.dead = true; this.log(`${this.players[g.owner].name} loses a war galley`, 'war', g.owner); }
+          // Same rule as a capture below: your own losses always reach you, two
+          // strangers sinking each other in a far sea are throttled. Left open
+          // these alone were 81% of the chronicle.
+          const ours = g.owner === this.humanId || prey.owner === this.humanId;
+          const say = ours || this.time >= (this.seaNewsAt || 0);
+          if (say && !ours) this.seaNewsAt = this.time + ECON.SEA_NEWS_EVERY;
+          if (prey.hp <= 0){ prey.dead = true; if (say) this.log(`${this.players[prey.owner].name} loses a war galley`, 'war', prey.owner); }
+          if (g.hp <= 0){ g.dead = true; if (say) this.log(`${this.players[g.owner].name} loses a war galley`, 'war', g.owner); }
         } else {
           prey.dead = true;
+          // Anything happening to your own ships is always news. Two strangers
+          // trading blows in a far sea is not: unfiltered, these were 61% of
+          // every message in the log — 245 of 400 — and they buried the sixteen
+          // realms that fell and the nine oaths sworn in the same span. So the
+          // wider sea war is throttled rather than silenced, which also keeps
+          // it working on the server, where there is no single human to test
+          // against and an ownership filter would mute the sea completely.
+          const mine_ = g.owner === this.humanId || prey.owner === this.humanId;
+          const tell = mine_ || this.time >= (this.seaNewsAt || 0);
+          if (tell && !mine_) this.seaNewsAt = this.time + ECON.SEA_NEWS_EVERY;
           if (prey.kind === 'trade'){
             // a taken trader is plunder, not just a sinking
             mine.ducats += CFG.PRIZE;
-            this.log(`A galley of ${mine.name} takes a trader of ${this.players[prey.owner].name}`, 'war', g.owner);
-          } else {
+            if (tell) this.log(`A galley of ${mine.name} takes a trader of ${this.players[prey.owner].name}`, 'war', g.owner);
+          } else if (tell){
             this.log(`A galley of ${mine.name} sinks a longship of ${this.players[prey.owner].name}`, 'war', g.owner);
           }
         }
@@ -1497,6 +1848,18 @@ class Game {
 
   // How long a standing pact still has to run, in seconds.
   pactLeft(a, b){ return Math.max(0, (this.players[a].pact.get(b) || 0) - this.time); }
+
+  // The year the realm has reached. Everything that wants a date asks for this
+  // rather than doing its own arithmetic on `time`.
+  get year(){ return this.startYear + Math.floor(this.time / CFG.YEAR_SECS); }
+
+  // Where a lord sits, in degrees — what the name stock and the region bands
+  // are keyed on.
+  seatDegrees(tile){
+    const x = tile % this.W, y = (tile / this.W) | 0;
+    return [EU.lon0 + (x + 0.5) / this.W * (EU.lon1 - EU.lon0),
+            EU.lat1 - (y + 0.5) / this.H * (EU.lat1 - EU.lat0)];
+  }
   // ------------------------------------------------------------------- bots
   ringOf(p, cap){
     const counts = new Map(), nb = new Int32Array(4);
@@ -1562,7 +1925,7 @@ class Game {
     };
     const T = p.tiles;
     const cap = p.jobCap;
-    // Build where the doctrine says workers should go but there is no work for
+    // Build where the priorities say workers should go but there is no work for
     // them: a priority with no building behind it employs nobody.
     // Answer the shortage you actually have. Reading only the worker-demand gap
     // left lords starving with fields to spare and marching half-armed with
@@ -1663,7 +2026,12 @@ class Game {
   }
 
   botNaval(p){
-    if (!p.coast.size || p.ducats < 400 || p.sold < 500) return false;
+    // An invasion overseas is a war like any other, so it wants the same
+    // preparation — and the preparation is due when the fleet is loaded, not
+    // when it beaches: by then the men are at sea and already committed. This
+    // was the last door left open, and about a tenth of all wars came through
+    // it with no arms and no treasury behind them.
+    if (!p.coast.size || p.ducats < 400 || p.sold < 500 || !this.warReady(p)) return false;
     const marks = this.players.filter(q => q.alive && q.id !== p.id && !p.allies.has(q.id) && q.coast.size > 3);
     if (!marks.length) return false;
     marks.sort((a, b) => this.power(a) - this.power(b));
@@ -1687,10 +2055,18 @@ class Game {
       for (const sct of SECTORS){
         if (sct !== 'farm') p.w[sct] = Math.max(0.05, p.w[sct] - 0.007);
       }
-    } else if (p.food > 2 && p.doctrineW){
-      // comfortable again — drift back toward the doctrine we were built for
-      for (const sct of SECTORS) p.w[sct] += (p.doctrineW[sct] - p.w[sct]) * 0.12;
+    } else if (p.food > 2){
+      // comfortable again — drift back toward how the realm runs at rest
+      for (const sct of SECTORS) p.w[sct] += (p.restW[sct] - p.w[sct]) * 0.12;
     }
+  }
+
+  // Is this lord in a state to open a war? Men called up and actually come in,
+  // arms for them, and coin in hand to keep them there. All three, or it waits.
+  warReady(p){
+    return p.sold >= ECON.WAR_HOST * p.pop
+        && p.equip >= ECON.WAR_EQUIP
+        && p.ducats >= ECON.WAR_CHEST;
   }
 
   botMobilise(p){
@@ -1701,11 +2077,40 @@ class Game {
       if (a.target === p.id) threat += 12;
       if (a.owner === p.id) threat += 6;
     }
-    const wanted = threat > 6 ? p.warMobil : 0;
+    // A lord mobilises because it is threatened, because it means to fight, or
+    // because the free land is nearly gone and it can see what comes next. That
+    // last one matters: while there is open ground to take, no lord ever wants
+    // a war, so none prepares for one — and they all began mustering only once
+    // the map was full, which put the first war nineteen minutes into a match
+    // that ends at twenty-five.
+    // Full mobilisation is for a war you are in or a war you mean to start.
+    // When the free land merely runs out, a realm *arms* — it does not empty
+    // its fields. Treating "the land is gone" as a reason for full mobilisation
+    // put every lord on a war footing permanently from 72% claimed onward, and
+    // since soldiers still eat but no longer farm, a third of them starved.
+    const landGone = (this.claimedShare || 0) > ECON.WAR_LOOMS;
+    const wanted = (threat > 6 || p.wantWar) ? ECON.WAR_MOBIL
+                 : landGone ? ECON.WAR_MOBIL * ECON.ARMING
+                 : 0;
     p.mobil += Math.max(-0.05, Math.min(0.05, wanted - p.mobil));
     // arms you cannot forge are arms you must buy time for: if the stockpile is
     // dry, stop drafting men there is no kit for
     if (p.arms < p.levy * 0.15 && p.mobil > 0) p.mobil = Math.max(0, p.mobil - 0.08);
+    // A realm that cannot feed its host sends men home. This is the only lever
+    // on it: botFeed shuffles *civilians* between sectors and has no reach into
+    // the men already under arms, so without this a lord could mobilise itself
+    // into a famine and then sit in it. Measured, mobilisation was doubling the
+    // starving lords — 19% to 37% — with nothing able to answer.
+    if (p.food < 0) p.mobil = Math.max(0, p.mobil - 0.06);
+    // Short of kit? Put hands in the forges until there is some — but never
+    // while the realm is hungry. Arming and feeding were pulling the same
+    // labour in opposite directions, botFeed shoving hands back to the fields
+    // while this shoved them into the forges, and the lords starved: 31% of
+    // them against 11% before. Answer the shortage you actually have.
+    if (p.wantWar && p.equip < ECON.WAR_EQUIP && p.food >= 0){
+      p.w.forge = Math.min(0.55, p.w.forge + 0.03);
+      p.w.trade = Math.max(0.08, p.w.trade - 0.01);
+    }
   }
 
   botThink(p){
@@ -1735,7 +2140,11 @@ class Game {
     for (const aid of p.allies){
       const q = this.players[aid];
       if (!q.alive){ p.allies.delete(aid); continue; }
-      if (this.power(q) < this.power(p) * 0.35 && p.aggr > 0.62 && this.rand() < 0.05){
+      // Betrayal is still a war, and wants the same preparation as any other —
+      // otherwise it is the one door left open through which a lord can march
+      // unarmed and penniless.
+      if (this.power(q) < this.power(p) * 0.35 && p.aggr > 0.62 && this.rand() < 0.05
+          && this.warReady(p)){
         this.breakAlly(p.id, aid, true);
         this.launch(p.id, aid, p.sold * 0.55);
         return;
@@ -1766,15 +2175,24 @@ class Game {
       if (w > bestW){ bestW = w; bestT = o; }
     }
     if (bestT === null){ this.botNaval(p); return; }
+
+    // Claiming open ground is not a war: no defenders, no preparation, and the
+    // map would never be settled if it needed a war chest.
+    if (bestT >= 0){
+      // A war on another lord has to be prepared for. If this lord is not
+      // ready, it does not abandon the idea — it starts getting ready, which
+      // is what mobilisation is for, and comes back to this when it can.
+      if (!this.warReady(p)){
+        p.wantWar = true;
+        return;
+      }
+      p.wantWar = false;
+    }
+
     // Against another lord, wait and hit hard. Dribbling the levy out in small
     // attacks just feeds a rival who bleeds you back — with few lords left that
     // reads as endless churn and no war ever ends.
-    // Readiness is now "how much of my nation is actually under arms and
-    // equipped", not "how full is my population bar".
     const need = bestT < 0 ? 0.02 : 0.07 + (1 - p.aggr) * 0.05;
-    // A host with no arms fights at a third strength. Marching one at a lord is
-    // throwing men away — wait for the forges. Open ground has no defenders, so
-    // an unarmed levy will still do for claiming it.
     const fit = bestT < 0 ? ready : ready * p.quality;
     if (fit < need || p.sold < 60) return;
     let ratio = bestT < 0 ? 0.5 + p.aggr * 0.25 : 0.62 + p.aggr * 0.33;
@@ -1877,10 +2295,27 @@ class Game {
     }
 
     // --- hold the ordered army size by drafting or releasing civilians ---
-    const target = Math.max(0, Math.min(1, p.standing + p.mobil)) * p.pop;
+    // Rebuilding the peasant levy is free; everything above it is mustered, and
+    // paid for as it is raised. A realm short of coin therefore raises men
+    // slowly no matter what it has ordered, which is the whole cost of war.
+    // The free peasant levy is the same share for every lord. It was once keyed
+    // on a per-lord constant, which was a hidden subsidy: one kind of realm got
+    // a free army three times another's. Everything above the peasant levy is
+    // mustered and paid for, by everyone, which is what makes going to war a
+    // decision with a price rather than a slider.
+    const peasants = ECON.PEASANT_LEVY * p.pop;
+    const want = Math.max(ECON.PEASANT_LEVY, Math.min(1, p.standing + p.mobil));
+    const target = want * p.pop;
     const underArms = p.sold + p.levy;
+    p.mustered = 0;
     if (underArms < target){
-      const draft = Math.min(p.civ, (target - underArms) * 0.25 * dt);
+      let draft = Math.min(p.civ, (target - underArms) * ECON.DRAFT_RATE * dt);
+      const free = Math.max(0, Math.min(draft, peasants - underArms));
+      const afford = p.ducats * ECON.MUSTER_DRAW * dt / ECON.MUSTER_COST;
+      if (draft - free > afford) draft = free + afford;
+      const paid = Math.max(0, draft - free);
+      p.ducats -= paid * ECON.MUSTER_COST;
+      p.mustered = paid / Math.max(dt, 1e-6);   // men bought a second, for the HUD
       p.civ -= draft; p.levy += draft;
     } else if (underArms > target * 1.25 && p.mobil <= 0){
       const home = Math.min(p.sold, (underArms - target) * 0.15 * dt);
@@ -1929,7 +2364,7 @@ class Game {
   }
 
   audit(){
-    let alive = 0, best = -1, bestT = 0;
+    let alive = 0, best = -1, bestT = 0, held = 0;
     for (const p of this.players){
       if (!p.alive) continue;
       if (p.tiles === 0){
@@ -1944,11 +2379,17 @@ class Game {
         }
       }
       alive++;
+      held += p.tiles;
       if (p.tiles > bestT){ bestT = p.tiles; best = p.id; }
     }
     this.aliveCount = alive;
     this.leader = best;
     this.leadShare = best >= 0 ? bestT / this.landCount : 0;
+    // How much of the map is spoken for. Lords watch this: when the free land
+    // is nearly gone they start preparing for the war that must follow, rather
+    // than waiting until the last field is taken and only then beginning to
+    // muster — which left the first war until nineteen minutes in.
+    this.claimedShare = this.landCount ? held / this.landCount : 0;
 
     for (const p of this.players){
       if (!p.alive || !p.allies.size) continue;
@@ -1983,18 +2424,29 @@ function makeMatch(opts){
     return PALETTE[(g.rand() * PALETTE.length) | 0];
   };
   const names = new Set();
-  const pickName = () => {
-    for (let i = 0; i < 60; i++){ const n = makeHouseName(g.rand); if (!names.has(n)){ names.add(n); return n; } }
-    return makeHouseName(g.rand) + ' II';
+  const pickName = (where) => {
+    for (let i = 0; i < 60; i++){
+      const n = makeHouseName(g.rand, where, g.startYear);
+      if (!names.has(n)){ names.add(n); return n; }
+    }
+    return makeHouseName(g.rand, where, g.startYear) + ' II';
+  };
+  // A seat drawn from open land, for the houses that are not one of the great
+  // powers — so they are still named for somewhere rather than from nowhere.
+  const openSeat = () => {
+    for (let i = 0; i < 400; i++){
+      const t = (g.rand() * g.N) | 0;
+      if (g.terrain[t] >= T_PLAIN && g.terrain[t] !== T_PEAK) return t;
+    }
+    return -1;
   };
   if (opts.human){
     used.add(opts.human.color); names.add(opts.human.name);
     const h = g.addLord(opts.human.name, opts.human.color, false);
     g.humanId = h.id;
-    // the player picks their own doctrine with the sliders — start them level
-    h.doctrine = 'your own';
-    h.w = { farm:0.40, forge:0.22, trade:0.28, works:0.10 };
-    h.standing = 0.08; h.mobil = 0; h.warMobil = 0;
+    // the player sets their own priorities with the sliders — start them level
+    h.w = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
+    h.standing = ECON.PEASANT_LEVY; h.mobil = 0;
   }
   // On the Europe map the AI lords are the powers of the age, seated at home.
   if (g.preset === 'europe'){
@@ -2004,12 +2456,24 @@ function makeMatch(opts){
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     for (let i = 0; i < opts.bots; i++){
-      const power = pool[i % pool.length];
-      const lord = g.addLord(power ? power[0] : pickName(), pickColor(), true);
-      if (power) lord.home = [power[1], power[2]];
+      // The historical powers are dealt out once each. Past them — more lords
+      // than there were great powers — a house is raised on open ground and
+      // named for that ground and for the year, rather than the pool wrapping
+      // round and seating a second Kingdom of France on top of the first.
+      const power = i < pool.length ? pool[i] : null;
+      if (power){
+        const lord = g.addLord(power[0], pickColor(), true);
+        names.add(power[0]);
+        lord.home = [power[1], power[2]];
+      } else {
+        const t = openSeat();
+        const where = t >= 0 ? g.seatDegrees(t) : null;
+        const lord = g.addLord(pickName(where), pickColor(), true);
+        if (where) lord.home = where;
+      }
     }
   } else {
-    for (let i = 0; i < opts.bots; i++) g.addLord(pickName(), pickColor(), true);
+    for (let i = 0; i < opts.bots; i++) g.addLord(pickName(null), pickColor(), true);
   }
   return g;
 }
@@ -2017,8 +2481,8 @@ function makeMatch(opts){
 // Node takes this as a module; browser and jsc pick the declarations up as globals.
 if (typeof module !== 'undefined' && module.exports){
   module.exports = {
-    CFG, ECON, SECTORS, ARCHETYPES, BUILDS, SIEGE, PALETTE, TINCTURES,
-    Game, Lord, Attack, Heap, makeMatch, makeHouseName, mulberry32, hslHex, pickFrom,
+    CFG, ECON, SECTORS, START_W, BUILDS, SIEGE, PALETTE, TINCTURES, POWERS, EU,
+    Game, Lord, Attack, Heap, makeMatch, makeHouseName, regionAt, mulberry32, hslHex, pickFrom,
     fbm, vnoise, hash2,
     T_SEA, T_SHOAL, T_PLAIN, T_WOOD, T_HILL, T_PEAK,
     B_NONE, B_TOWN, B_CASTLE, B_HARBOR, B_SIEGE, B_TOWER, B_FARM, B_FORGE, B_ALL,

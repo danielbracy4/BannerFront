@@ -45,11 +45,16 @@ if (d3 && g.place(0, d3, 6) === null){
 }
 
 // caravans
-const before = p.ducats;
+// Watch what the caravans themselves earn, not the treasury. "Ducats went up"
+// only ever meant net cash flow was positive — tax and trade could carry it on
+// their own, so the check could pass with the roads doing nothing, and once
+// mustering started drawing on the treasury it began failing with the roads
+// working perfectly. p.vanPaid counts what arrived by road and nothing else.
+p.vanPaid = 0;
 let seen = 0;
 for (let i = 0; i < 900; i++){ g.tick(0.1); if (g.caravans.length > seen) seen = g.caravans.length; }
 check(seen > 0, `caravans run the roads on their own (${seen} at once)`);
-check(p.ducats > before, 'and pay out when they arrive');
+check(p.vanPaid > 0, `and pay out when they arrive (${Math.round(p.vanPaid)} ducats by road)`);
 
 // supply
 check(p.supplied(a % W, (a / W) | 0), 'ground beside a town is supplied');

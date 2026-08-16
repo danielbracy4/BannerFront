@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { Server } = require('socket.io');
 const { Room, MAX_LORDS } = require('./room.js');
+const db = require('./db.js');
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.resolve(__dirname, '../..');
@@ -30,11 +31,73 @@ const TYPES = {
   '.css':'text/css; charset=utf-8', '.json':'application/json',
   '.png':'image/png', '.svg':'image/svg+xml', '.ico':'image/x-icon',
 };
+// ------------------------------------------------------------------ the API
+// Accounts ride the same HTTP server as the client. Everything is JSON, the
+// token travels as a Bearer header, and sign-in attempts are rate-limited per
+// address so the ledger cannot be ground through.
+const attempts = new Map();   // ip -> { n, resetAt }
+function throttled(ip){
+  const t = Date.now();
+  const a = attempts.get(ip) || { n: 0, resetAt: t + 600e3 };
+  if (t > a.resetAt){ a.n = 0; a.resetAt = t + 600e3; }
+  a.n++; attempts.set(ip, a);
+  return a.n > 30;
+}
+function api(req, res){
+  const url = (req.url || '').split('?')[0];
+  if (!url.startsWith('/api/')) return false;
+  // The client is served from Netlify and the server lives on Railway, so every
+  // account call is cross-origin. Socket.IO carries its own CORS config; plain
+  // fetch does not, and without these headers the browser refuses the response
+  // in production while working perfectly on localhost. Same allow-list as the
+  // socket, and the Bearer header has to be named or the preflight fails.
+  const origin = req.headers.origin;
+  const cors = originOk(origin) && origin ? {
+    'Access-Control-Allow-Origin': origin,
+    'Vary': 'Origin',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+  } : {};
+  if (req.method === 'OPTIONS'){ res.writeHead(204, cors); res.end(); return true; }
+  const send = (code, obj) => {
+    res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, cors));
+    res.end(JSON.stringify(obj));
+  };
+  const token = (req.headers.authorization || '').replace(/^Bearer /, '');
+  if (req.method === 'GET'){
+    if (url === '/api/me'){
+      const a = db.resolve(token);
+      if (!a) return send(401, { err: 'not signed in' }), true;
+      const { id, ...pub } = a;   // the row id is the server's business
+      return send(200, { account: pub }), true;
+    }
+    if (url === '/api/leaderboard') return send(200, { lords: db.leaderboard() }), true;
+    return send(404, { err: 'no such scroll' }), true;
+  }
+  if (req.method !== 'POST') return send(405, { err: 'wrong method' }), true;
+  let body = '';
+  req.on('data', d => { body += d; if (body.length > 4096) req.destroy(); });
+  req.on('end', () => {
+    let msg = {};
+    try { msg = JSON.parse(body || '{}'); } catch (e) { return send(400, { err: 'bad json' }); }
+    if (url === '/api/signup' || url === '/api/login'){
+      if (throttled(req.socket.remoteAddress || '?')) return send(429, { err: 'too many attempts — rest a while' });
+      const r = url === '/api/signup' ? db.signup(msg.name, msg.pass) : db.login(msg.name, msg.pass);
+      return send(r.err ? 400 : 200, r);
+    }
+    if (url === '/api/logout') return send(200, db.logout(token));
+    return send(404, { err: 'no such scroll' });
+  });
+  return true;
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz'){
     res.writeHead(200, { 'Content-Type':'application/json' });
-    return res.end(JSON.stringify({ ok:true, rooms: rooms.size, uptime: process.uptime() }));
+    return res.end(JSON.stringify({ ok:true, rooms: rooms.size, ledger: db.enabled, uptime: process.uptime() }));
   }
+  if (api(req, res)) return;
   let rel = decodeURIComponent((req.url || '/').split('?')[0]);
   if (rel === '/') rel = '/index.html';
   const file = path.join(ROOT, rel);
@@ -85,7 +148,10 @@ io.on('connection', socket => {
   socket.on('join', msg => {
     if (room) return;
     room = openLobby();
-    room.addSeat(socket, msg && msg.name, msg && msg.colour);
+    // A signed-in player's seat carries their account, so the match result can
+    // be written to the ledger when the war ends. Anonymous play stays welcome.
+    const acct = db.resolve(msg && msg.token);
+    room.addSeat(socket, msg && msg.name, msg && msg.colour, acct ? acct.id : null);
   });
 
   socket.on('intent', msg => { if (room) room.intent(socket.id, msg); });
