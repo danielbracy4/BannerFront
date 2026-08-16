@@ -18,8 +18,14 @@ const check = (cond, m) => cond ? ok(m) : bad(m);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
+  // The lobby waits a full minute and there is no way to hurry it — that is the
+  // point of it. A test cannot sit through that for every run, so the wait is
+  // shortened here rather than skipped: the *rule* is still exercised end to
+  // end, the clock is just wound faster. BANNERFRONT_LOBBY_SECS exists for this
+  // and for nothing else, and the checks below prove it cannot be bypassed at
+  // whatever length it is set to.
   const srv = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], {
-    env: { ...process.env, PORT: String(PORT) },
+    env: { ...process.env, PORT: String(PORT), BANNERFRONT_LOBBY_SECS: '6' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   srv.stdout.on('data', d => process.stdout.write('    [server] ' + d));
@@ -52,13 +58,28 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check(!!lob, 'lobby broadcast received');
   check(lob && lob.humans.length === 2, `both humans seated (got ${lob ? lob.humans.length : 0})`);
   check(lob && lob.seconds > 0 && lob.seconds <= 60, `countdown running (${lob && lob.seconds}s)`);
-  check(lob && lob.aiFill > 0, `AI will fill the rest (${lob && lob.aiFill})`);
+  check(lob && lob.ai >= core.CFG.AI_MIN && lob.ai <= core.CFG.AI_MAX,
+        `the muster raises ${lob && lob.ai} AI lords, inside ${core.CFG.AI_MIN}–${core.CFG.AI_MAX}`);
+  check(lob && lob.map === 'europe', `on Europe (${lob && lob.map})`);
+  check(lob && lob.capacity === core.CFG.MAX_HUMANS, `with ${lob && lob.capacity} seats at the table`);
+  check(lob && lob.starting === null, 'and it is not starting yet');
+  const advertisedAI = lob && lob.ai;
 
-  // don't sit through the whole minute
-  A.emit('beginNow');
-  await wait(1200);
+  // The bypass, tried the way a modified client would: the old event, plus a
+  // few invented ones. None of them may shorten the wait by a second.
+  const beforeTry = lob && lob.seconds;
+  for (let i = 0; i < 30; i++) A.emit('beginNow');
+  A.emit('start'); A.emit('begin'); A.emit('forceStart');
+  await wait(600);
+  check(!seen.start, 'no client message can call the muster early');
+  const lobNow = seen.lobby[seen.lobby.length - 1];
+  check(lobNow && lobNow.seconds <= beforeTry, 'the clock only ever runs down');
+  check(lobNow && lobNow.ai === advertisedAI, 'and the AI count is never re-rolled');
 
-  check(!!seen.start, 'match started');
+  // Now let the shortened clock run out on its own. Nothing is emitted here —
+  // the match begins because the server decided the time was up.
+  await wait(7000);
+  check(!!seen.start, 'the match begins when the clock runs out, unasked');
 
   // --- placement: players choose their own ground -------------------------
   check(seen.start.placing > 0, `players get ${seen.start.placing}s to choose their ground`);
@@ -127,7 +148,17 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   if (!seen.start) return done(1);
   const myLord = seen.start.you[A.id];
   check(Number.isInteger(myLord) && myLord >= 0, `client A owns lord #${myLord}`);
-  check(seen.start.lords.length === 41, `${seen.start.lords.length} lords in the match (want 41)`);
+  // The claim that matters: the lobby advertised a number of AI lords, and the
+  // match must contain exactly that many — not the roster minus the players,
+  // which is how the count used to come out short by however many people had
+  // joined. Counted from the roster the server actually sent.
+  const humansHere = seen.start.lords.filter(l => !l.bot).length;
+  const aiHere = seen.start.lords.filter(l => l.bot).length;
+  check(aiHere === advertisedAI,
+        `${aiHere} AI lords in the match against ${advertisedAI} advertised`);
+  check(humansHere === 2, `and ${humansHere} human seats for the 2 players`);
+  check(seen.start.lords.length === advertisedAI + humansHere,
+        `${seen.start.lords.length} lords in all = ${advertisedAI} AI + ${humansHere} human`);
   check(seen.start.seed > 0 && seen.start.w > 0, 'map seed + size sent so the client can rebuild terrain');
   const mine = seen.start.lords[myLord];
   check(mine && mine.name === 'House Test' && mine.bot === false,

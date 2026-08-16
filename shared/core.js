@@ -125,6 +125,15 @@ const CFG = {
   // the same way.
   EPOCH_YEAR:     1300,
   YEAR_SECS:      12,      // seconds of match time to the year
+
+  // --- how many lords ---
+  // Every match runs somewhere between these many AI lords, rolled once when
+  // the lobby opens and honoured exactly. Shared rather than server-only so a
+  // solo match and an online one are the same size of war.
+  AI_MIN:         40,
+  AI_MAX:         90,
+  MAX_HUMANS:     12,      // seats at the table before a lobby is full
+  LOBBY_SECS:     60,      // ...and how long it waits for them
 };
 
 const T_SEA = 0, T_SHOAL = 1, T_PLAIN = 2, T_WOOD = 3, T_HILL = 4, T_PEAK = 5;
@@ -436,9 +445,12 @@ const TINCTURES = [
   [  6, 56], [212, 50], [128, 36], [286, 29], [ 42, 62], [ 22, 52],
   [340, 34], [188, 34], [ 95, 31], [258, 32], [166, 33], [ 15, 28],
 ];
+// Twelve tinctures in nine shades. Nine rather than six because a match can now
+// seat ninety AI lords plus a lobby of humans, and a realm that shares its
+// colour with its neighbour cannot be told apart on the map at all.
 const PALETTE = (() => {
-  const out = [], shades = [43, 33, 53, 38, 48, 28];
-  for (let i = 0; i < 72; i++){
+  const out = [], shades = [43, 33, 53, 38, 48, 28, 58, 23, 63];
+  for (let i = 0; i < 108; i++){
     const t = TINCTURES[i % TINCTURES.length];
     out.push(hslHex(t[0], t[1], shades[((i / TINCTURES.length) | 0) % shades.length]));
   }
@@ -1342,6 +1354,60 @@ class Game {
       if (d >= minDist) return t;
     }
     return best;
+  }
+
+  // Deal `n` distinct starting fields, spread over the whole map.
+  //
+  // Seating lord-by-lord with `pickSeat` cannot promise this: it samples at
+  // random and gives up after a fixed number of tries, so with ninety lords on
+  // a crowded map it starts returning whatever it last looked at — which may
+  // already be taken. This walks a shuffled list of every valid field instead,
+  // so a field can be handed out at most once by construction, and relaxes the
+  // spacing in passes rather than failing: a full map seats everyone closer
+  // together instead of seating two lords on the same ground.
+  //
+  // Deterministic given the match seed, so the server and any reconnecting
+  // client build the same world.
+  pickSeats(n){
+    if (n <= 0) return [];
+    const valid = [];
+    for (let t = 0; t < this.N; t++){
+      if (this.terrain[t] < T_PLAIN || this.terrain[t] === T_PEAK) continue;
+      if (this.owner[t] >= 0) continue;
+      valid.push(t);
+    }
+    // Fisher-Yates on the match's own RNG — same seed, same shuffle, everywhere.
+    for (let i = valid.length - 1; i > 0; i--){
+      const j = (this.rand() * (i + 1)) | 0;
+      [valid[i], valid[j]] = [valid[j], valid[i]];
+    }
+    const W = this.W, out = [], px = [], py = [];
+    // Start from the spacing an even scatter would allow, then halve it each
+    // pass until everyone has a home.
+    let space = Math.max(4, Math.sqrt(valid.length / Math.max(1, n)) * 0.80);
+    const used = new Set();
+    for (let pass = 0; pass < 7 && out.length < n; pass++){
+      const min2 = space * space;
+      for (let i = 0; i < valid.length && out.length < n; i++){
+        const t = valid[i];
+        if (used.has(t)) continue;
+        const x = t % W, y = (t / W) | 0;
+        let ok = true;
+        for (let k = 0; k < px.length; k++){
+          const dx = x - px[k], dy = y - py[k];
+          if (dx * dx + dy * dy < min2){ ok = false; break; }
+        }
+        if (!ok) continue;
+        used.add(t); out.push(t); px.push(x); py.push(y);
+      }
+      space /= 2;
+    }
+    // Last resort: the map simply has fewer usable fields than lords asked for.
+    // Hand out what is left rather than repeating a field.
+    for (let i = 0; i < valid.length && out.length < n; i++){
+      if (!used.has(valid[i])){ used.add(valid[i]); out.push(valid[i]); }
+    }
+    return out;
   }
 
   // Casualties fall on the men under arms first, and only reach the civilian
@@ -2440,14 +2506,32 @@ function makeMatch(opts){
     }
     return -1;
   };
+  const levelStart = (l) => {
+    l.w = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
+    l.standing = ECON.PEASANT_LEVY; l.mobil = 0;
+  };
   if (opts.human){
     used.add(opts.human.color); names.add(opts.human.name);
     const h = g.addLord(opts.human.name, opts.human.color, false);
     g.humanId = h.id;
     // the player sets their own priorities with the sliders — start them level
-    h.w = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
-    h.standing = ECON.PEASANT_LEVY; h.mobil = 0;
+    levelStart(h);
   }
+  // Seats held for human players in an online match. These are *extra* lords,
+  // created before the AI and never counted as AI.
+  //
+  // The server used to make `bots` lords and then convert the first few into
+  // the humans who had joined, which meant the AI count silently came out short
+  // by however many people were playing — ask for 73 with two humans in the
+  // lobby and 71 lords are actually run by the machine. Reserving the seats
+  // separately is what makes the AI count exact.
+  const heldSeats = [];
+  for (let i = 0; i < (opts.humanSeats || 0); i++){
+    const l = g.addLord('Awaiting a lord', pickColor(), false);
+    levelStart(l);
+    heldSeats.push(l.id);
+  }
+  g.humanSeats = heldSeats;
   // On the Europe map the AI lords are the powers of the age, seated at home.
   if (g.preset === 'europe'){
     const pool = POWERS.slice();
@@ -2475,6 +2559,9 @@ function makeMatch(opts){
   } else {
     for (let i = 0; i < opts.bots; i++) g.addLord(pickName(null), pickColor(), true);
   }
+  // The authoritative roll-call. Anything that wants to know how many lords the
+  // machine is running asks this rather than counting the roster and hoping.
+  g.aiIds = g.players.filter(p => p.bot).map(p => p.id);
   return g;
 }
 

@@ -226,7 +226,10 @@
   #lobbyhead .lh{font-size:26px;letter-spacing:.12em;color:#f2e6c6;text-transform:uppercase}
   #lobbyhead .tag{margin-top:3px}
   #lobbyclock{font-size:38px;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1}
-  #roster{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0 4px;min-height:22px}
+  /* A muster can now run to ninety lords. Without a ceiling the roster grows
+     until it walks straight over the guide beneath it. */
+  #roster{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0 4px;min-height:22px;
+          max-height:132px;overflow-y:auto}
   .seat{display:flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid #4d3f26;
     border-radius:2px;font-size:11.5px;color:#c3b590;background:#00000033;animation:sl .25s ease-out}
   .seat i{width:7px;height:10px;clip-path:polygon(0 0,100% 0,100% 100%,50% 78%,0 100%)}
@@ -260,8 +263,20 @@
     font-size:11px;color:#e0d3b0;background:#00000050}
   #lobbyfoot{display:flex;align-items:center;justify-content:space-between;gap:14px;
     margin-top:12px;padding-top:11px;border-top:1px solid var(--panel-line)}
-  #dontshow{display:flex;align-items:center;gap:7px;font-size:12px;color:#a89566;cursor:pointer}
-  #dontshow input{accent-color:#b8912f;width:14px;height:14px;cursor:pointer}
+  /* The lobby's standing facts: which realm, who is here, how many lords the
+     machine will run. Set out like an order of battle rather than a form. */
+  #lobbyfacts{display:flex;gap:16px;margin-top:9px;font-size:11px;letter-spacing:.14em;
+              text-transform:uppercase;color:#8e7a4f}
+  #lobbyfacts span{white-space:nowrap}
+  #lobbyfacts b{color:#e9dcba;font-weight:400}
+  #lobbyclockwrap{text-align:right}
+  #lobbyclocklab{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#7b6a45;
+                 margin-bottom:2px}
+  #lobbystate{font-size:12.5px;letter-spacing:.1em;color:#a89566;text-align:center;width:100%}
+  #lobbystate.go{color:var(--gold)}
+  /* A fact, set out like the inputs beside it but not one of them. */
+  .fldstatic{background:#181410;border:1px solid #3a2f1c;padding:7px 9px;color:#8e7a4f;
+             font-size:12.5px;letter-spacing:.03em}
   #guideshut{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:12px;color:#8e7a4f}
   #guideshut button{font-size:11.5px;letter-spacing:.1em;color:var(--gold);
     border:1px solid #5c4c2d;padding:4px 12px;border-radius:2px}
@@ -342,21 +357,18 @@
        Take <b id="wintxt">65%</b> of the realm, or be the last banner flying.</p>
     <div class="fields">
       <div class="fld"><label>Your house</label><input id="inName" maxlength="18" placeholder="House Vareth"></div>
+      <!-- How many rivals is no longer a setting: every match rolls its own
+           number of lords when the muster opens, so no two wars are the same
+           size. The lobby shows the count once it is decided. -->
       <div class="fld"><label>Rival lords</label>
-        <select id="inBots">
-          <option value="14">14 — Skirmish</option>
-          <option value="26">26 — Border war</option>
-          <option value="40" selected>40 — The Long War</option>
-          <option value="60">60 — Bloodbath</option>
-        </select>
+        <div id="inBots" class="fldstatic">40–90, drawn at the muster</div>
       </div>
+      <!-- Europe is the only realm in rotation while it is being tuned. The
+           other presets still exist in shared/core.js and are simply not
+           offered; putting them back is a matter of listing them here. -->
       <div class="fld"><label>Realm</label>
-        <select id="inMap">
+        <select id="inMap" disabled title="Europe is the only realm in rotation">
           <option value="europe" selected>Europe, 1300</option>
-          <option value="continents">Continents</option>
-          <option value="pangaea">Pangaea</option>
-          <option value="isles">Broken Isles</option>
-          <option value="valley">Great Valley</option>
         </select>
       </div>
       <div class="fld" style="flex:1 1 100%"><label>Colours</label><div id="swatches"></div></div>
@@ -399,8 +411,16 @@
       <div>
         <div class="lh">Mustering the host</div>
         <div class="tag" id="lobbysub">lords are riding in — the war begins when the horn sounds</div>
+        <div id="lobbyfacts">
+          <span id="lfMap">EUROPE</span>
+          <span id="lfPlayers">PLAYERS 1</span>
+          <span id="lfAI">AI LORDS —</span>
+        </div>
       </div>
-      <div id="lobbyclock">1:00</div>
+      <div id="lobbyclockwrap">
+        <div id="lobbyclocklab">The war begins in</div>
+        <div id="lobbyclock">1:00</div>
+      </div>
     </div>
     <div id="roster"></div>
     <div id="guide">
@@ -411,13 +431,8 @@
       </div>
       <div id="tabbody"></div>
     </div>
-    <div id="guideshut" style="display:none">
-      <span>The guide is hidden. It will return whenever the game changes.</span>
-      <button id="btnGuide">Show it now</button>
-    </div>
     <div id="lobbyfoot">
-      <label id="dontshow"><input type="checkbox" id="cbHelp"> Don't show this again</label>
-      <button class="cta" id="btnBegin" style="margin-top:0;padding:10px 34px">Begin now</button>
+      <div id="lobbystate">Waiting for players…</div>
     </div>
   </div>
 </div>
@@ -1607,9 +1622,17 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.14.0';
+const VERSION = '0.15.0';
 
 const CHANGELOG = [
+  { v:'0.15.0', when:'the muster', notes:[
+    '<b>Every muster runs its full minute.</b> A lobby now begins for exactly two reasons: the seats fill, or the time is up. The "begin now" button is gone — a host who could skip the wait meant nobody else ever got to join — and the server owns the clock, so no client can bring it forward.',
+    '<b>Every war is a different size.</b> Each match draws its own number of rival lords, <b>between 40 and 90</b>, when the muster opens. You will not fight the same war twice.',
+    '<b>Lords rise wherever the map allows.</b> The powers of the age no longer open at their historical capitals — every standard, yours included, is planted on ground drawn fresh for that match. Forty-six fixed seats could never have served ninety lords, and a map that always begins the same way is always the same game.',
+    'Fixed: <b>the AI count was quietly short by however many people were playing.</b> A 73-lord war with two players in it ran 71 lords, because the humans were carved out of the AI instead of seated beside them. The number on the muster board is now the number in the field.',
+    '<b>Europe is the only realm for now</b>, while it is being tuned. The others are not gone, only out of rotation.',
+    'The <b>How to play</b> book is shown to everyone who joins, every time, and can no longer be switched off — a player who dismissed it once had no way of knowing the rules had changed underneath them.',
+  ]},
   { v:'0.14.0', when:'settling, teaching, and a ledger', notes:[
     '<b>Claiming empty land no longer eats your army.</b> Open ground has no defenders, so taking it is settlement rather than battle: the men you send <b>mostly stay as farmers on the new land</b>. Before this, committing your whole host to unclaimed fields bought thirty of them and left you with nothing — the ground was cheap and the army was gone.',
     '<b>The placement screen shows where the powers will rise.</b> Choosing your ground is the most consequential decision in a match and it was made blind. Iberia <i>looks</i> like a quiet peninsula and seats five crowns; the Russian steppe seats two. Now you can see it before you plant.',
@@ -1831,7 +1854,11 @@ function changelogHTML(){
     <ul>${c.notes.map(n => `<li>${n}</li>`).join('')}</ul>`).join('');
 }
 
-const HELP_KEY = 'bannerfront.guideSeen';
+// The guide used to be hidden by a "don't show this again" tick, remembered in
+// localStorage. It is gone, along with the preference — and any copy of it left
+// on a returning player's machine is cleared here, or the setting would go on
+// hiding a guide that no longer has a way to be turned off.
+try { localStorage.removeItem('bannerfront.guideSeen'); } catch(e){}
 let lobbyTimer = null, lobbyLeft = 60;
 
 function showTab(which){
@@ -1857,13 +1884,11 @@ function openLobby(solo){
   $('lobby').style.display = 'flex';
   $('verlab').textContent = 'v' + VERSION;
 
-  // The guide reappears whenever VERSION changes, even if it was dismissed.
-  const seen = (() => { try { return localStorage.getItem(HELP_KEY); } catch(e){ return null; } })();
-  const hide = seen === VERSION;
-  $('guide').style.display = hide ? 'none' : 'block';
-  $('guideshut').style.display = hide ? 'flex' : 'none';
-  $('cbHelp').checked = hide;
-  if (!hide) showTab('play');
+  // The guide is shown every time somebody joins. There is deliberately no way
+  // to turn it off: a player who dismissed it once on a previous version had no
+  // idea the rules had changed underneath them.
+  $('guide').style.display = 'block';
+  showTab('play');
 
   $('roster').innerHTML = '';
   const addSeat = (name, colour, you) => {
@@ -1889,6 +1914,7 @@ function openLobby(solo){
 }
 
 function openSoloLobby(){
+  rollSoloAI();          // once per match, before the field is built
   const g = createMatch();
   const me = g.players[g.humanId];
   const seats = g.players.filter(p => p.id !== g.humanId);
@@ -1901,30 +1927,71 @@ function openSoloLobby(){
   };
   addSeat(me.name, me.color, true);
 
-  lobbyLeft = 60;
-  let joined = 0;
+  // Solo keeps the same shape as an online muster — the same minute, the same
+  // facts — so the two do not feel like different games. There is nobody else
+  // to wait for, so it is a shorter wait.
+  $('lfMap').innerHTML = 'EUROPE';
+  $('lfPlayers').innerHTML = 'Players <b>1</b> — alone';
+  $('lfAI').innerHTML = `AI lords <b>${seats.length}</b>`;
+  $('lobbyclocklab').textContent = 'The war begins in';
+
+  // Naming all ninety would be a wall of text nobody reads, so the AI arrive as
+  // a count — the same way the online lobby reports them.
+  const aiSeat = document.createElement('div');
+  aiSeat.className = 'seat';
+  $('roster').appendChild(aiSeat);
+
+  lobbyLeft = 12;
   clearInterval(lobbyTimer);
   const tickLobby = () => {
     lobbyLeft--;
-    const m = Math.floor(Math.max(0, lobbyLeft) / 60), s = Math.max(0, lobbyLeft) % 60;
-    $('lobbyclock').textContent = m + ':' + String(s).padStart(2, '0');
-    // let the roster fill across the first two thirds of the wait
-    const want = Math.min(seats.length, Math.round((60 - lobbyLeft) / 40 * seats.length));
-    while (joined < want){ addSeat(seats[joined].name, seats[joined].color, false); joined++; }
-    $('lobbysub').textContent = joined >= seats.length
-      ? `${joined + 1} banners answer the call — all but yours are AI`
-      : 'lords are riding in — the war begins when the horn sounds';
+    $('lobbyclock').textContent = Math.max(0, lobbyLeft);
+    // let the banners answer across the first two thirds of the wait
+    const arrived = Math.min(seats.length, Math.round((12 - lobbyLeft) / 8 * seats.length));
+    aiSeat.innerHTML = `<i style="background:#5c4c2d"></i>${arrived} lords ride under their own banners<b>AI</b>`;
+    $('lobbystate').textContent = lobbyLeft <= 0
+      ? 'THE HORN SOUNDS — STARTING GAME…'
+      : `${arrived} of ${seats.length} banners have answered`;
+    $('lobbystate').className = lobbyLeft <= 0 ? 'go' : '';
     if (lobbyLeft <= 0) beginFromLobby();
   };
-  $('lobbyclock').textContent = '1:00';
+  $('lobbyclock').textContent = '12';
+  aiSeat.innerHTML = `<i style="background:#5c4c2d"></i>0 lords ride under their own banners<b>AI</b>`;
+  $('lobbystate').textContent = `${seats.length} lords ride under their own banners`;
   lobbyTimer = setInterval(tickLobby, 1000);
 }
 
-// The server's lobby: its countdown, its roster.
+// The server's lobby, and only the server's: its clock, its roster, its count
+// of AI, its decision to start. Everything here is displayed, nothing is
+// decided — the client has no way to bring the muster forward.
 function onServerLobby(m){
   if (!onlineLobby || getComputedStyle($('lobby')).display === 'none') return;
   const secs = Math.max(0, m.seconds | 0);
-  $('lobbyclock').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  const humans = m.humans || [];
+
+  $('lfMap').innerHTML = (m.map || 'europe').toUpperCase();
+  $('lfPlayers').innerHTML = `Players <b>${humans.length}</b> / ${m.capacity || '—'}`;
+  $('lfAI').innerHTML = `AI lords <b>${m.ai != null ? m.ai : '—'}</b>`;
+
+  if (m.starting === 'full'){
+    $('lobbyclock').textContent = '—';
+    $('lobbyclocklab').textContent = 'Lobby full';
+    $('lobbystate').textContent = 'LOBBY FULL — STARTING GAME…';
+    $('lobbystate').className = 'go';
+  } else if (m.starting === 'expired' || secs <= 0){
+    $('lobbyclock').textContent = '0';
+    $('lobbyclocklab').textContent = 'Time expired';
+    $('lobbystate').textContent = 'TIME EXPIRED — STARTING GAME…';
+    $('lobbystate').className = 'go';
+  } else {
+    $('lobbyclock').textContent = secs;
+    $('lobbyclocklab').textContent = 'The war begins in';
+    $('lobbystate').textContent = humans.length > 1
+      ? `${humans.length} lords are gathered — waiting for more…`
+      : 'Waiting for players…';
+    $('lobbystate').className = '';
+  }
+
   $('roster').innerHTML = '';
   const seat = (name, colour, tag, you) => {
     const d = document.createElement('div');
@@ -1932,24 +1999,17 @@ function onServerLobby(m){
     d.innerHTML = `<i style="background:${colour || '#888'}"></i>${name}${tag ? '<b>' + tag + '</b>' : ''}`;
     $('roster').appendChild(d);
   };
-  (m.humans || []).forEach((h, i) => seat(h.name, h.colour, 'PLAYER', i === 0));
-  if (m.aiFill > 0) seat(`${m.aiFill} lords will be filled by AI`, '#5c4c2d', '', false);
-  $('lobbysub').textContent = (m.humans || []).length > 1
-    ? `${m.humans.length} players waiting — the war begins when the horn sounds`
-    : 'waiting for other players — AI will fill the rest';
+  humans.forEach((h, i) => seat(h.name, h.colour, 'PLAYER', i === 0));
+  if (m.ai > 0) seat(`${m.ai} lords ride under their own banners`, '#5c4c2d', 'AI', false);
+  $('lobbysub').textContent = 'lords are riding in — the war begins when the horn sounds';
 }
 
+// Only solo play begins from here. An online match begins when the *server*
+// says so — its lobby runs a full minute unless it fills, and there is no
+// message a client can send to hurry it.
 function beginFromLobby(){
   clearInterval(lobbyTimer); lobbyTimer = null;
-  try {
-    if ($('cbHelp').checked) localStorage.setItem(HELP_KEY, VERSION);
-    else localStorage.removeItem(HELP_KEY);
-  } catch(e){ /* private mode — just show it again next time */ }
-  if (onlineLobby && NET.online){
-    NET.sock.emit('beginNow');       // the server decides when the match starts
-    $('lobbysub').textContent = 'calling the muster…';
-    return;
-  }
+  if (onlineLobby && NET.online) return;
   $('lobby').style.display = 'none';
   startMatch();
 }
@@ -2157,13 +2217,6 @@ function setupStart(){
   $('inName').value = makeHouseName(Math.random);
   $('btnPlay').onclick = () => openLobby(false);
   $('btnSolo').onclick = () => openLobby(true);
-  $('btnBegin').onclick = beginFromLobby;
-  $('btnGuide').onclick = () => {
-    $('guide').style.display = 'block';
-    $('guideshut').style.display = 'none';
-    $('cbHelp').checked = false;
-    showTab('play');
-  };
   $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) showTab(b.dataset.t); };
   $('btnAgain').onclick = () => {
     $('over').style.display = 'none'; $('hud').style.display = 'none'; $('start').style.display = 'flex';
@@ -2173,11 +2226,16 @@ function setupStart(){
 // The match is built when the lobby opens, so the roster shown while you wait
 // is the actual set of lords you will face — not decorative names.
 let pendingGame = null;
+let soloAI = 0;      // rolled once when the solo lobby opens, then honoured
+function rollSoloAI(){
+  soloAI = CFG.AI_MIN + Math.floor(Math.random() * (CFG.AI_MAX - CFG.AI_MIN + 1));
+  return soloAI;
+}
 function createMatch(){
   const name = ($('inName').value || '').trim().slice(0, 18) || 'House Vareth';
   pendingGame = makeMatch({
-    bots: +$('inBots').value,
-    preset: $('inMap').value,
+    bots: soloAI || rollSoloAI(),
+    preset: 'europe',
     human: { name, color: chosenColor },
   });
   return pendingGame;

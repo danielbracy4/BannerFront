@@ -140,7 +140,8 @@ const rooms = new Map();
 // leaving the first player waiting for a full house.
 function openLobby(){
   for (const r of rooms.values()) if (r.phase === 'lobby') return r;
-  const r = new Room(io, { lords: MAX_LORDS });
+  // The room decides its own map and its own AI count; nothing is passed in.
+  const r = new Room(io, {});
   rooms.set(r.id, r);
   return r;
 }
@@ -169,8 +170,10 @@ io.on('connection', socket => {
 
   socket.on('intent', msg => { if (room) room.intent(socket.id, msg); });
 
-  // Any player may call the muster early once someone is waiting.
-  socket.on('beginNow', () => { if (room && room.phase === 'lobby') room.begin(); });
+  // There is deliberately no way to start a match early. The lobby runs its
+  // full minute unless it fills, and the server owns that clock — a host who
+  // could skip the wait would mean nobody else ever got to join. Old clients
+  // still emit this; it is answered with nothing on purpose.
 
   socket.on('disconnect', () => { if (room) room.dropSeat(socket.id); });
 });

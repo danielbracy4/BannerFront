@@ -463,7 +463,48 @@ server/src/index.js   http + Socket.IO, static client, /healthz, /api/*
 server/src/room.js    lobby, match lifecycle, tick loop, intent handling
 server/src/db.js      the ledger — accounts, sessions, match records
 server/test/smoke.js  boots the server and drives two real clients through a match
+tools/lobby.js        the lobby rules, the roll-call and the scatter
 ```
+
+### The muster
+
+A lobby runs for **60 seconds** and begins for exactly two reasons: the seats
+fill, or the time is up. **There is no way to start it early.** The old "begin
+now" button and its socket event are gone — a host who could skip the wait would
+mean nobody else ever got to join — and `begin()` is guarded rather than trusted,
+so a modified client that finds the method still gets nothing. The countdown on
+screen is a readout of the server's clock, never its own.
+
+Every match rolls its own number of AI lords, **40 to 90**, once when the lobby
+opens. The number is fixed from that moment: it is not re-rolled when it is read,
+and no lord is created after the war begins.
+
+Getting that count *exactly* right needed a change in how seats are dealt.
+`makeMatch` used to build the whole field as AI and then convert the first few
+into whoever had joined, so a lobby of two players quietly turned a 73-lord match
+into 71 — the count on screen was right and the world was wrong. Human seats are
+now reserved *alongside* the AI (`humanSeats`), never carved out of them, and
+`g.aiIds` is the roll-call anything can check against.
+
+### Where lords begin
+
+Seats are dealt by `Game.pickSeats(n)`: every valid field is collected, shuffled
+on the match seed, and handed out under a spacing rule that relaxes in passes
+until everyone has ground. A field can be dealt at most once **by construction**,
+which the old per-lord `pickSeat` could not promise — it sampled at random, gave
+up after a fixed number of tries, and with ninety lords began returning ground
+that was already taken. Because it runs on the match's own RNG it is
+deterministic: the same seed builds the same world on the server and on any
+client that rebuilds it.
+
+The powers no longer open at their historical capitals. Forty-six fixed seats
+cannot serve ninety lords, and a match where the same crowns always rise in the
+same places is the same match every time.
+
+**Europe is the only realm in rotation** while it is being tuned. The other
+presets are still in `shared/core.js` and are simply not offered — putting them
+back is a matter of listing them in the client's `#inMap` and letting `Room` take
+a preset again.
 
 ### The ledger
 
