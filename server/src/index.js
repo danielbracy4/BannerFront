@@ -11,6 +11,7 @@ const fs = require('fs');
 const { Server } = require('socket.io');
 const { Room, MAX_LORDS } = require('./room.js');
 const db = require('./db.js');
+const auth = require('./auth.js');
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.resolve(__dirname, '../..');
@@ -60,6 +61,9 @@ function api(req, res){
     'Access-Control-Max-Age': '86400',
   } : {};
   if (req.method === 'OPTIONS'){ res.writeHead(204, cors); res.end(); return true; }
+  // Google and Steam are browser redirects, not fetches — they answer with a
+  // 302 rather than JSON, so they are routed before the JSON helpers below.
+  if (url.startsWith('/api/auth/') && auth.route(req, res, url)) return true;
   const send = (code, obj) => {
     res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, cors));
     res.end(JSON.stringify(obj));
@@ -73,6 +77,9 @@ function api(req, res){
       return send(200, { account: pub }), true;
     }
     if (url === '/api/leaderboard') return send(200, { lords: db.leaderboard() }), true;
+    // So the title screen can offer only the sign-ins this server can honour,
+    // rather than a button that redirects into an apology.
+    if (url === '/api/providers') return send(200, { ledger: db.enabled, ...auth.providers }), true;
     return send(404, { err: 'no such scroll' }), true;
   }
   if (req.method !== 'POST') return send(405, { err: 'wrong method' }), true;

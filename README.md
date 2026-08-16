@@ -487,7 +487,48 @@ POST /api/logout   (Bearer)     -> {}
 POST /api/delete   (Bearer) {pass} -> {gone} | {err}
 GET  /api/me       (Bearer)     -> {account} | 401
 GET  /api/leaderboard           -> {lords:[…]}
+GET  /api/providers             -> {ledger, google, steam}
+GET  /api/auth/google           -> 302 to Google   (needs GOOGLE_CLIENT_ID/SECRET)
+GET  /api/auth/steam            -> 302 to Valve    (needs nothing)
 ```
+
+## Signing in through Google and Steam
+
+Both are redirects out and back, written on `fetch` and `node:crypto` — no
+dependency, and each provider is inert unless its credentials are set, so a
+server with neither configured runs as it always did and offers no buttons.
+`/api/providers` is what the title screen asks, so it can only offer sign-ins
+the server can actually honour.
+
+| variable | for |
+|---|---|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in |
+| `STEAM_API_KEY` | Steam display names (the sign-in itself needs no key) |
+| `STEAM_LOGIN=0` | turn Steam off |
+| `CLIENT_ORIGIN` | where to send the player back (default `https://bannerfront.com`) |
+| `PUBLIC_ORIGIN` | this server's own address, for the callback URL |
+
+Google's redirect URI must be registered as
+`PUBLIC_ORIGIN + /api/auth/google/callback`.
+
+**The session comes home in the URL fragment**, not the query string. Fragments
+are never sent to a server, so the token stays out of access logs, proxy logs
+and `Referer` headers; the client takes it and scrubs the address bar.
+
+**Sign-ins match on the provider id and nothing else, deliberately.** The
+tempting second key is the email, so that someone who founded a house with a
+password and later clicks "sign in with Google" lands back in their own account
+rather than an empty one. That is only safe if the password account's address
+was *verified*, and this server sends no mail. Adopting an account by an
+unverified address is an account takeover: found a house claiming somebody
+else's gmail, wait for them to sign in with Google, and the server hands you
+their record with your password still on it. So Google, Steam and password
+houses stay separate. The address Google gives us is verified and is stored, so
+the day verification exists this can be switched on safely.
+
+Accounts that never had a password get an **unusable** one — a random hash
+nobody knows the input to, so password login can never succeed on them. Leaving
+the field empty instead would have been a way in.
 
 `delete` asks for the password again rather than trusting the session, so a
 token left behind on a shared machine is not enough to destroy the account it

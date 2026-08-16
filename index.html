@@ -371,6 +371,11 @@
         <input id="acPass" type="password" maxlength="64" placeholder="password" style="width:104px">
         <button id="btnAcIn">Sign in</button>
         <button id="btnAcUp">Found a house</button>
+        <span id="acProviders" style="display:none">
+          <span style="color:#6f6045;margin:0 6px">or</span>
+          <button id="btnGoogle" style="display:none">Google</button>
+          <button id="btnSteam" style="display:none">Steam</button>
+        </span>
       </span>
       <span id="ledgerOut" style="display:none">
         Sworn as <b id="acWho" style="color:#e9dcba">—</b>
@@ -2075,20 +2080,43 @@ const LEDGER = {
     if (on){
       const a = this.account;
       $('acWho').textContent = a.name;
-      $('acRecord').textContent = a.played
+      const how = a.via === 'google' ? ' · via Google' : a.via === 'steam' ? ' · via Steam' : '';
+      $('acRecord').textContent = (a.played
         ? ` · ${a.wins} won of ${a.played} · best ${a.bestShare}% of a realm`
-        : ' · no wars fought yet';
+        : ' · no wars fought yet') + how;
       // Your account name *is* your house — otherwise the card says "sworn as
       // House Ironvale" while you ride to war as a random name from the pool.
       $('inName').value = a.name;
     }
   },
+  // Google and Steam send the player back with the session token in the URL
+  // *fragment*, which browsers never transmit to a server — so it stays out of
+  // access logs and Referer headers. Take it, keep it, and scrub the address
+  // bar so a shared screenshot of the URL is not a shared account.
+  catchReturn(){
+    const h = location.hash || '';
+    const tok = (h.match(/[#&]token=([^&]+)/) || [])[1];
+    const bad = (h.match(/[#&]authfail=([^&]+)/) || [])[1];
+    if (!tok && !bad) return null;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (tok) this.save(decodeURIComponent(tok));
+    return bad ? decodeURIComponent(bad).replace(/\+/g, ' ') : null;
+  },
+  async providers(){
+    const r = await this.call('providers').catch(() => ({}));
+    const any = r.google || r.steam;
+    $('acProviders').style.display = any ? '' : 'none';
+    $('btnGoogle').style.display = r.google ? '' : 'none';
+    $('btnSteam').style.display  = r.steam ? '' : 'none';
+  },
   async refresh(){
-    if (!this.token) return this.show();
+    const failed = this.catchReturn();
+    this.providers();
+    if (!this.token) return this.show(failed || '');
     const r = await this.call('me');
     this.account = r.account || null;
     if (!this.account) this.save('');
-    this.show();
+    this.show(failed || '');
   },
   async enter(path){
     const name = $('acName').value.trim(), pass = $('acPass').value;
@@ -2108,6 +2136,10 @@ function setupStart(){
   $('btnAcIn').onclick  = () => LEDGER.enter('login');
   $('btnAcUp').onclick  = () => LEDGER.enter('signup');
   $('btnAcOut').onclick = async () => { await LEDGER.call('logout', {}); LEDGER.save(''); LEDGER.account = null; LEDGER.show('signed out'); };
+  // A full page navigation, not a fetch: the provider needs to show the player
+  // its own consent screen on its own domain, which is the point of it.
+  $('btnGoogle').onclick = () => { location.href = (NET.url || '') + '/api/auth/google'; };
+  $('btnSteam').onclick  = () => { location.href = (NET.url || '') + '/api/auth/steam'; };
   $('acPass').addEventListener('keydown', e => { if (e.key === 'Enter') LEDGER.enter('login'); });
   LEDGER.refresh();
   const picks = PALETTE.slice(0, 12);   // the twelve tinctures at full shade

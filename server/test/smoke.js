@@ -180,6 +180,12 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     });
     return { status: r.status, body: await r.json().catch(() => ({})) };
   };
+  // The sign-in flows answer with a 302 rather than JSON, so what matters is
+  // where they point. `redirect: 'manual'` keeps fetch from following it.
+  const redirect = async (path) => {
+    const r = await fetch(`http://localhost:${PORT}${path}`, { redirect: 'manual' });
+    return r.headers.get('location') || '';
+  };
   // Names cap at 18 characters, so keep the stamp short — and assert the
   // *reason* each refusal gives, or a check can pass because something else
   // went wrong. The first cut of this test used a 20-character name: both
@@ -218,6 +224,46 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await api('logout', {}, tok);
   const gone = await api('me', null, tok);
   check(gone.status === 401, 'signing out ends the session');
+
+  // --- signing in through Google and Steam --------------------------------
+  // The redirect flows themselves need Valve and Google, so what is checked
+  // here is everything this server decides on its own: that an unconfigured
+  // provider apologises instead of crashing, that a forged callback is refused,
+  // and — the one that matters — that a sign-in can never land in somebody
+  // else's house.
+  const prov = await api('providers');
+  check(prov.status === 200 && typeof prov.body.steam === 'boolean',
+        `the title screen is told which sign-ins work (google ${prov.body.google}, steam ${prov.body.steam})`);
+
+  const noGoogle = await redirect('/api/auth/google');
+  check(/authfail=google/.test(noGoogle), 'an unconfigured google sign-in apologises rather than crashing');
+
+  const steamOut = await redirect('/api/auth/steam');
+  check(/steamcommunity\.com\/openid\/login/.test(steamOut), 'steam sign-in redirects to Valve');
+  const state = (steamOut.match(/callback%3Fs%3D([a-f0-9]+)/) || [])[1];
+  check(!!state, 'and carries a one-time state through the round trip');
+
+  const forged = await redirect('/api/auth/steam/callback?s=deadbeef&openid.mode=id_res');
+  check(/authfail=stale/.test(forged), 'a callback with an unknown state is refused');
+  if (state){
+    const replayed = await redirect(`/api/auth/steam/callback?s=${state}&openid.mode=id_res`);
+    await redirect(`/api/auth/steam/callback?s=${state}&openid.mode=id_res`);
+    check(/authfail=/.test(replayed), 'and a state is spent the first time it is used');
+  }
+
+  // The takeover this design exists to prevent: a house founded with a password
+  // on somebody's email must never be adopted by their Google sign-in, because
+  // this server never proved that email belonged to whoever typed it.
+  const db2 = require('../src/db.js');
+  const victimEmail = 'someone@example.com';
+  db2.signup('Impostor House', 'portcullis88');
+  const viaG = db2.viaProvider('google_sub', 'G-smoke-1', { email: victimEmail, name: 'Impostor House' });
+  check(!viaG.err && viaG.account.name !== 'Impostor House',
+        `a google sign-in never lands in a password house (got "${viaG.account.name}")`);
+  const again = db2.viaProvider('google_sub', 'G-smoke-1', { email: victimEmail, name: 'Impostor House' });
+  check(again.account.name === viaG.account.name, 'and returns the same house the second time');
+  const guess = db2.login(viaG.account.name, 'portcullis88');
+  check(!!guess.err, 'a house with no password cannot be signed into with one');
 
   await wait(500);
   console.log('');
