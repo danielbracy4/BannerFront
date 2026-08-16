@@ -112,6 +112,23 @@ module.exports = {
     return {};
   },
 
+  // A player who founded a house can dissolve it. The password is asked for
+  // again on purpose: a token left behind on a shared machine should not be
+  // enough to destroy the account it belongs to.
+  remove(token, pass){
+    if (!db) return { err: 'the ledger is closed on this server' };
+    const s = token && db.prepare('SELECT * FROM sessions WHERE token = ?').get(String(token));
+    if (!s || s.expires < now()) return { err: 'not signed in' };
+    const a = db.prepare('SELECT * FROM accounts WHERE id = ?').get(s.account);
+    if (!a) return { err: 'no such house' };
+    const tryHash = Buffer.from(hashPass(pass, a.salt), 'hex');
+    if (!crypto.timingSafeEqual(tryHash, Buffer.from(a.hash, 'hex')))
+      return { err: 'the word is wrong' };
+    db.prepare('DELETE FROM sessions WHERE account = ?').run(a.id);
+    db.prepare('DELETE FROM accounts WHERE id = ?').run(a.id);
+    return { gone: a.name };
+  },
+
   // token -> account row, or null. The id rides along for match recording.
   resolve(token){
     if (!db || !token) return null;

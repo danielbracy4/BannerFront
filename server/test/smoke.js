@@ -204,6 +204,17 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check(anon.status === 401, 'a forged token is refused');
   const board = await api('leaderboard');
   check(board.status === 200 && Array.isArray(board.body.lords), 'the roll of honour reads');
+  // Dissolving a house asks for the password again — a token left on a shared
+  // machine must not be enough to destroy the account it belongs to.
+  const wrongPass = await api('delete', { pass: 'notthewordatall' }, tok);
+  check(wrongPass.status === 400, 'a house is not dissolved on the wrong word');
+  const stillThere = await api('me', null, tok);
+  check(stillThere.status === 200, 'and it is still standing afterwards');
+  const dissolved = await api('delete', { pass: 'portcullis88' }, tok);
+  check(dissolved.status === 200 && dissolved.body.gone === who, 'a house can be dissolved by its own lord');
+  const reborn = await api('login', { name: who, pass: 'portcullis88' });
+  check(reborn.status === 400, 'a dissolved house cannot be signed into');
+
   await api('logout', {}, tok);
   const gone = await api('me', null, tok);
   check(gone.status === 401, 'signing out ends the session');

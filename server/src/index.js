@@ -87,6 +87,11 @@ function api(req, res){
       return send(r.err ? 400 : 200, r);
     }
     if (url === '/api/logout') return send(200, db.logout(token));
+    if (url === '/api/delete'){
+      if (throttled(req.socket.remoteAddress || '?')) return send(429, { err: 'too many attempts — rest a while' });
+      const r = db.remove(token, msg.pass);
+      return send(r.err ? 400 : 200, r);
+    }
     return send(404, { err: 'no such scroll' });
   });
   return true;
