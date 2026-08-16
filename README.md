@@ -484,9 +484,14 @@ so there is nothing to CSRF. Sign-in attempts are rate-limited per address.
 POST /api/signup   {name, pass} -> {token, account} | {err}
 POST /api/login    {name, pass} -> {token, account} | {err}
 POST /api/logout   (Bearer)     -> {}
+POST /api/delete   (Bearer) {pass} -> {gone} | {err}
 GET  /api/me       (Bearer)     -> {account} | 401
 GET  /api/leaderboard           -> {lords:[…]}
 ```
+
+`delete` asks for the password again rather than trusting the session, so a
+token left behind on a shared machine is not enough to destroy the account it
+belongs to.
 
 A match record is written in exactly one place — `Room.finish`, on the
 authoritative server, for seats that carried an account. A solo result is the
