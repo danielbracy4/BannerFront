@@ -69,7 +69,10 @@
   .bar3 i{display:block;height:100%;width:0%;transition:width .2s}
   #bciv{background:linear-gradient(180deg,#7ea154,#5d7a3c)}
   #blevy{background:linear-gradient(180deg,#d0a63f,#9c7a24)}
-  #bsold{background:linear-gradient(180deg,#c2604c,#8f4132)}
+  /* Green, to match the soldiers shown under every banner on the map. It was
+     red, which read as "danger" and clashed with the levy/soldier pair now
+     drawn everywhere else. */
+  #bsold{background:linear-gradient(180deg,#8fae62,#5f7a3c)}
   .mini{font-size:10.5px;color:#8f7c52;margin-bottom:7px;letter-spacing:.01em}
   .warn{color:#d9714f !important}
   #goldrow .v{color:var(--gold)}
@@ -127,6 +130,10 @@
   .item .nm{font-size:13px;color:#eadfbe;min-width:104px}
   .item .ds{flex:1;font-size:11.5px;color:#9d8659}
   .item .cs{font-size:12px;color:var(--gold);font-variant-numeric:tabular-nums}
+  /* What you hold of a work against what the realm can run. */
+  .item .cap{font-size:11.5px;color:#8fae62;font-variant-numeric:tabular-nums;
+             min-width:46px;text-align:right;letter-spacing:.02em}
+  .item .cap.full{color:#c05b4d}
   .prow{display:flex;align-items:center;gap:9px;padding:4px 9px}
   .prow .pn{font-size:12.5px;color:#eadfbe;min-width:66px}
   .prow .pri{-webkit-appearance:none;appearance:none;width:150px;height:5px;background:#000a;
@@ -455,6 +462,12 @@ const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
 
 let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
 let capitalMarks = null;   // where the powers will rise, shown during placement
+// Levies are gold and soldiers are green, everywhere the two appear — the
+// people bar, the banners on the map, the panel. Both are lifted from the
+// palette already in use rather than invented: the gold is the one the levy
+// bar has always been, the green the one the HUD uses for a good number.
+const LEVY_GOLD = '#d0a63f';
+const SOLDIER_GREEN = '#8fae62';
 let pcol = [];                       // per-lord rgb, precomputed
 let cam = { x: 0, y: 0, z: 3 };
 let mode = 'attack', modeArg = null;
@@ -777,6 +790,31 @@ function render(now){
     c.strokeText(lab, px, py + fs * 0.62);
     c.fillStyle = p.allies.has(game.humanId) ? '#a9e08c' : '#dccfae';
     c.fillText(lab, px, py + fs * 0.62);
+
+    // Beneath the head-count, what that realm can actually put in the field:
+    // ( levies / soldiers ). Two numbers because they are two different things
+    // — peasants raised, and professionals trained — and one number could only
+    // ever hide which. Drawn for every banner, AI included, straight from the
+    // simulation. Levies in the gold the HUD already uses for them, soldiers in
+    // its green, both outlined so they hold up over any tincture.
+    if (fs >= 10){
+      const ly = py + fs * 1.55, small = fs * 0.78;
+      c.font = `${small}px "Iowan Old Style", Palatino, Georgia, serif`;
+      const lv = fmt(Math.round(p.levy)), sd = fmt(Math.round(p.sold));
+      const wOpen = c.measureText('(').width, wLv = c.measureText(lv).width;
+      const wSep = c.measureText(' / ').width, wSd = c.measureText(sd).width;
+      const wAll = wOpen + wLv + wSep + wSd + c.measureText(')').width;
+      let x = px - wAll / 2;
+      c.textAlign = 'left';
+      c.lineWidth = Math.max(1.8, small * 0.3); c.strokeStyle = 'rgba(0,0,0,.8)';
+      const put = (s, col) => { c.strokeText(s, x, ly); c.fillStyle = col; c.fillText(s, x, ly); x += c.measureText(s).width; };
+      put('(', '#8e7a4f');
+      put(lv, LEVY_GOLD);
+      put(' / ', '#8e7a4f');
+      put(sd, SOLDIER_GREEN);
+      put(')', '#8e7a4f');
+      c.textAlign = 'center';
+    }
   }
   c.textAlign = 'left'; c.textBaseline = 'alphabetic';
 
@@ -1034,11 +1072,21 @@ function realmReadouts(){
 function renderTray(){
   if (openCat === 'realm') return renderRealmTray();
   const cat = CATS.find(x => x.id === openCat);
-  const rows = TOOLS.map((t, i) => ({ t, i })).filter(o => o.t.cat === openCat).map(({ t, i }) =>
-    `<button class="item ${toolReady(t) ? '' : 'off'}" data-i="${i}">${svg(t.k)}
+  const me = game.humanId >= 0 ? game.players[game.humanId] : null;
+  const rows = TOOLS.map((t, i) => ({ t, i })).filter(o => o.t.cat === openCat).map(({ t, i }) => {
+    // Every kind of work carries what you hold of it against what the realm can
+    // run. The ceiling is the real constraint now, so it belongs beside the
+    // price rather than being discovered by a refusal.
+    let tally = '';
+    if (t.kind === 'build' && me){
+      const have = me.st[t.arg].size, cap = me.capOf(t.arg);
+      tally = `<span class="cap ${have >= cap ? 'full' : ''}">${have} / ${cap}</span>`;
+    }
+    return `<button class="item ${toolReady(t) ? '' : 'off'}" data-i="${i}">${svg(t.k)}
       <span class="nm">${t.name}</span><span class="ds">${t.hint}${
         t.kind === 'build' ? ` <span style="color:#7f6c46">· ${BUILDS[t.arg].size}×${BUILDS[t.arg].size} of ground</span>` : ''}</span>
-      <span class="cs">${toolCost(t)}c</span></button>`).join('');
+      ${tally}<span class="cs">${toolCost(t)}c</span></button>`;
+  }).join('');
   $('tray').innerHTML = `<div class="th">${cat.name} — ${cat.sub}</div>${rows}`;
 }
 function refreshTools(){
@@ -1226,8 +1274,13 @@ function openCtx(px, py){
     for (const type of B_ALL){
       const B = BUILDS[type];
       const ok = !game.canPlace(me.id, t, type);
+      const have = me.st[type].size, cap = me.capOf(type), full = have >= cap;
+      // What you hold of this kind against what the realm can run. Shown on the
+      // order itself, so the ceiling is visible at the moment it stops you
+      // rather than only in the tray.
+      const tally = `<span style="color:${full ? '#c05b4d' : '#8fae62'}">${have}/${cap}</span>`;
       rows.push(mi('build:' + type, B.key,
-                   `Raise a ${B.name} <span style="color:#7f6c46">${B.size}×${B.size}</span>`,
+                   `Raise a ${B.name} ${tally} <span style="color:#7f6c46">${B.size}×${B.size}</span>`,
                    me.costOf(type), ok));
     }
   } else if (o < 0){
@@ -1319,15 +1372,21 @@ function updateHUD(){
   $('bciv').style.width  = (me.civ  / pop * 100) + '%';
   $('blevy').style.width = (me.levy / pop * 100) + '%';
   $('bsold').style.width = (me.sold / pop * 100) + '%';
-  $('smix').innerHTML = `${fmt(me.civ)} folk · <span style="color:#d0a63f">${fmt(me.levy)} levies</span>`
-                      + ` · <span style="color:#c2604c">${fmt(me.sold)} soldiers</span>`;
+  $('smix').innerHTML = `${fmt(me.civ)} folk · <span style="color:${LEVY_GOLD}">${fmt(me.levy)} levies</span>`
+                      + ` · <span style="color:${SOLDIER_GREEN}">${fmt(me.sold)} soldiers</span>`;
   const afield = committedOf(me);
   $('ssold').innerHTML = fmt(me.sold)
     + (afield > 0 ? ` <span style="color:#a89566">+${fmt(afield)} afield</span>` : '');
   // arms are only meaningful next to the host they have to equip
   const eq = me.equip;
+  // Soldiers are equipped from the armoury first; the levy gets what is left.
+  // Both shares are shown, because a realm can be fully armed on paper and
+  // still be sending peasants out with nothing.
+  const lq = me.levy > 0 ? me.levyEquip : null;
   $('sarms').innerHTML = fmt(me.arms) + ` <span class="${eq < 0.6 ? 'warn' : ''}"`
-    + ` style="font-size:11px">${(eq * 100).toFixed(0)}% armed</span>`
+    + ` style="font-size:11px;color:${SOLDIER_GREEN}">${(eq * 100).toFixed(0)}%</span>`
+    + (lq === null ? ''
+       : ` <span style="font-size:11px;color:${lq < 0.3 ? '#c05b4d' : LEVY_GOLD}">/ ${(lq * 100).toFixed(0)}%</span>`)
     + (me.armsRate ? ` <span style="color:#7f6c46;font-size:11px">+${me.armsRate.toFixed(0)}/s</span>` : '');
   const net = (me.income || 0) - (me.upkeep || 0);
   $('sgold').innerHTML = fmt(me.ducats)
@@ -1340,9 +1399,15 @@ function updateHUD(){
   $('snet').innerHTML = me.nodes.length < 2 ? '—'
     : `${me.roads.length} road${me.roads.length === 1 ? '' : 's'}`
       + (link > 0 ? ` <span style="color:#8fae62">+${(link * 100).toFixed(0)}% trade</span>` : '');
+  // Works you hold against what the realm can run, so the ceiling is visible
+  // without opening a tray. Red once a kind is full.
   const parts = [];
-  for (const b of B_ALL) if (me.st[b].size) parts.push(me.st[b].size + '× ' + BUILDS[b].name);
-  $('sbld').textContent = parts.length ? parts.join(', ') : '—';
+  for (const b of B_ALL){
+    if (!me.st[b].size) continue;
+    const have = me.st[b].size, cap = me.capOf(b);
+    parts.push(`<span style="color:${have >= cap ? '#c05b4d' : 'inherit'}">${have}/${cap}</span> ${BUILDS[b].name}`);
+  }
+  $('sbld').innerHTML = parts.length ? parts.join(', ') : '—';
   if (openCat === 'realm') realmReadouts();
   ratioLab(); refreshTools();
 
@@ -1622,9 +1687,17 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.15.0';
+const VERSION = '0.16.0';
 
 const CHANGELOG = [
+  { v:'0.16.0', when:'what a realm can run', notes:[
+    '<b>A realm can only run so many works.</b> Coin is no longer the only thing standing between you and a hundred farms — every kind of work has a ceiling, and the ceiling grows with the realm. A new holding runs three farms; a great power runs seventy. You cannot buy your way past it.',
+    '<b>Towns raise the ceiling.</b> That is what makes them worth building beyond their trade: they are how a realm earns the right to build anything else. Growing is now the way to build cheaply, rather than hoarding.',
+    '<b>Every work shows what you hold against what you can run</b> — <i>17 / 18 Farm</i> — in the tray, in the orders menu and in your own panel, red once a kind is full. The price rises as you fill up and falls again when the ceiling rises.',
+    '<b>Ground you take comes with the works on it</b>, however far over your ceiling they put you. You simply cannot raise more of that kind until the realm grows into them — so razing what you captured is a real choice.',
+    '<b>Every banner on the map now carries its levies and its soldiers</b> — <i>(4,659 / 23.2k)</i> — in gold and green, for your rivals as much as for you. Two numbers because they are two different things, and one could only ever hide which.',
+    '<b>Arms reach the levy.</b> Your soldiers are equipped from the armoury first, and the levy is handed what is left — so a peasant still cannot arm himself, and yet the forges decide what he is worth. The same levy behind full forges is a real force; on an empty armoury it is a mob with billhooks.',
+  ]},
   { v:'0.15.0', when:'the muster', notes:[
     '<b>Every muster runs its full minute.</b> A lobby now begins for exactly two reasons: the seats fill, or the time is up. The "begin now" button is gone — a host who could skip the wait meant nobody else ever got to join — and the server owns the clock, so no client can bring it forward.',
     '<b>Every war is a different size.</b> Each match draws its own number of rival lords, <b>between 40 and 90</b>, when the muster opens. You will not fight the same war twice.',

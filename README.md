@@ -82,9 +82,11 @@ keep going regardless.
 
 ## Releasing a change
 
-The lobby carries the player-facing guide and changelog, and it is **version
-gated**: a player who ticked "don't show this again" sees it once more the moment
-`VERSION` changes. So every time the game changes:
+The lobby carries the player-facing guide and changelog, and every player sees it
+every time they join — there is no longer any way to switch it off, because a
+player who dismissed it once had no way of knowing the rules had changed
+underneath them. `VERSION` is what the changelog is keyed to. So every time the
+game changes:
 
 1. Bump `VERSION` in `index.html` (search for `const VERSION`).
 2. Add a matching entry at the top of `CHANGELOG` beside it.
@@ -103,6 +105,7 @@ index.html            the client: renderer, HUD, input. Loads shared/core.js
 tools/sim.js|.sh      headless balance harness
 tools/readiness.js    do lords prepare before they go to war?
 tools/battle.js       does arming decide a fight, and does a front stay joined?
+tools/capacity.js     is the building ceiling real, and does the AI obey it?
 tools/roads.js        roads, caravans, trade and supply
 tools/botsense.js     do the lords' decisions cohere?
 tools/tempo.js        how fast does ground change hands, and does host size help?
@@ -205,6 +208,71 @@ needs, and *where* you build is a decision rather than a formality.
 
 `game.site` maps every occupied field back to the work standing on it, so
 overlap is impossible and razing frees the whole square.
+
+## What a realm can run
+
+Coin is not capacity. Every kind of work has a ceiling, and the ceiling grows
+with the realm rather than with the treasury:
+
+```
+worksCap = WORKS_BASE + WORKS_ROOT * sqrt(fields) + WORKS_PER_TOWN * towns
+capOf(kind) = worksCap * CAP_SHARE[kind]      (harbours also want shoreline)
+```
+
+Keyed on the **root** of the land held, for the reason this project keeps
+relearning — a linear term cannot cap size. At one work per field a great power
+would run thousands; at the root it runs about 160, and a new holding of twenty
+fields runs seven. Towns then raise the ceiling, which is what makes development
+the way to build more.
+
+| fields | ceiling | farms | forges | castles |
+|---|---|---|---|---|
+| 21 | 7 | 3 | 1 | 1 |
+| 400 | 28 | 12 | 7 | 5 |
+| 2,500 | 76 | 32 | 19 | 15 |
+| 10,000 | 164 | 68 | 42 | 32 |
+
+**Capacity gates construction, never possession.** Ground taken from a lord comes
+with the works standing on it, and those keep working however far over your
+ceiling they put you — you simply cannot raise more of that kind until the realm
+grows into them. This matters more than it sounds: measured before the change, a
+lord holding 514 works had *bought* 115 of them and taken 399. Capping what you
+may hold would have meant deleting conquered buildings; capping what you may
+build leaves conquest alone and still bit hard — works bought across all lords
+fell from 2,133 to 1,231, and land covered in buildings from 36% to 21%.
+
+Price rises with how full the ceiling is (`COST_FILL`, `COST_POW`) rather than
+with lifetime purchases. The old exponential on `bought[type]` punished razing,
+never noticed a captured work, and could not tell a realm of twenty fields from
+one of ten thousand. A farm costs 340 with room and 3,124 at the limit — and
+cheapens again the moment the ceiling rises.
+
+`node tools/capacity.js` checks the ceiling is real rather than decorative: that
+a lord with a hundred million ducats and nine hundred open fields builds exactly
+its cap and no more, and that across three thousand AI purchases not one work was
+raised by a lord already at its limit.
+
+## Levies, soldiers and arms
+
+They are three things, not two. `p.levy` are peasants raised; `p.sold` are
+trained soldiers; `p.arms` is an armoury belonging to the realm rather than to
+any man.
+
+**Soldiers are equipped first and the levy is handed what is left.** So a peasant
+cannot arm himself, and yet the forges still decide what he is worth: the same
+levy behind full forges is a real force, and on an empty armoury it is a mob.
+Without this the arms economy stopped at the edge of the levy, and a realm could
+raise a hundred thousand peasants and lose nothing by never building a forge.
+
+```
+levyArms  = max(0, arms - sold)      soldiers took theirs first
+levyEquip = levyArms / levy
+density   = (sold * quality + levy * LEVY_WORTH * levyQuality) / fields
+```
+
+Measured with 1,000 soldiers and 4,000 levies: an armoury of 1,000 arms the
+soldiers and none of the levy; 3,000 arms half of it; 5,000 all of it — and the
+ground the realm holds gets 3.3x harder to take across that range.
 
 ## Roads, trade and supply
 

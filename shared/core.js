@@ -214,6 +214,42 @@ const ECON = {
   // slider with nothing behind it: a realm that cannot pay cannot raise the
   // men however loudly it orders them, so the choice to go to war competes
   // directly with everything else coin buys.
+  // --- what a realm can actually run ---
+  // A realm cannot build without limit, and the limit is not coin. Works need
+  // ground to stand on, hands to run them, and somewhere to administer them
+  // from — so capacity grows with the realm rather than with the treasury.
+  //
+  // Keyed on the *root* of the land held, for the reason this project keeps
+  // relearning: a linear term cannot cap size. At one work per field a great
+  // power would run thousands; at the root it runs about a hundred, and a new
+  // holding of twenty fields runs four or five. Towns then raise the ceiling,
+  // which is what makes development the way to build more — not saving up.
+  //
+  // Capacity gates *construction*, never possession. Ground taken from a lord
+  // comes with the works standing on it, and those keep working however far
+  // over your ceiling they put you; you simply cannot raise more of that kind
+  // until the realm grows into them. Razing what you captured is a real choice.
+  WORKS_BASE:       3,      // what the smallest holding can run
+  WORKS_ROOT:       0.95,   // ...plus this per root of a field held
+  WORKS_PER_TOWN:   2.2,    // and this much more for every town administering
+  // Each kind's share of that ceiling. They do not sum to one — a realm at its
+  // limit for farms may still have room for forges.
+  CAP_SHARE: { farm:0.42, forge:0.26, town:0.15, harbor:0.16, castle:0.20, tower:0.10, siege:0.05 },
+  CAP_COAST:        22,     // ...and a harbour wants this many coastal fields
+  CAP_MIN:          1,      // every realm may always run one of anything
+
+  // How the price rises as a realm fills its ceiling. Cheap while there is
+  // room, dear at the limit — and *cheaper again* once the ceiling rises, so
+  // growing the realm is what makes building affordable rather than hoarding.
+  // This replaced an exponential on lifetime purchases, which punished razing,
+  // never noticed a captured work, and could not tell a realm of twenty fields
+  // from one of ten thousand.
+  COST_FILL:        3.0,
+  COST_POW:         1.6,
+
+  // What a levy is worth beside a soldier, before arms are counted.
+  LEVY_WORTH:       0.45,
+
   PEASANT_LEVY:     0.08,   // share of the population always under arms
   MUSTER_COST:      0.85,   // ducats to raise one man above the peasant levy
   DRAFT_RATE:       0.25,   // share of the shortfall drafted per second
@@ -757,9 +793,27 @@ class Lord {
   get pop(){ return this.civ + this.levy + this.sold; }
   // What holds ground: soldiers, plus levies who can at least stand on a wall,
   // scaled by how well the host is equipped.
-  get density(){ return this.tiles ? (this.sold + this.levy * 0.35) * this.quality / this.tiles : 0; }
+  // What holds ground: soldiers at their own quality, and the levy at its own —
+  // which is a different and usually worse number, see below.
+  get density(){
+    if (!this.tiles) return 0;
+    return (this.sold * this.quality
+          + this.levy * ECON.LEVY_WORTH * this.levyQuality) / this.tiles;
+  }
   get equip(){ return this.sold > 0 ? Math.min(1, this.arms / this.sold) : 1; }
   get quality(){ return ECON.UNARMED + (1 - ECON.UNARMED) * this.equip; }
+
+  // Arms belong to the realm, not to the man. The soldiers are equipped first —
+  // they are the professionals and the armoury is theirs — and the levy is
+  // handed whatever is left over. So a peasant cannot arm himself, and yet the
+  // forges still decide what he is worth: the same levy raised behind full
+  // forges is a real force, and raised on an empty armoury is a mob with
+  // billhooks. Without this the arms economy stopped at the edge of the levy,
+  // and a realm could raise a hundred thousand peasants and lose nothing by
+  // never building a forge for them.
+  get levyArms(){ return Math.max(0, this.arms - this.sold); }
+  get levyEquip(){ return this.levy > 0 ? Math.min(1, this.levyArms / this.levy) : 0; }
+  get levyQuality(){ return ECON.UNARMED + (1 - ECON.UNARMED) * this.levyEquip; }
   get jobCap(){
     const t = this.st[B_TOWN].size, h = this.st[B_HARBOR].size;
     return {
@@ -867,7 +921,30 @@ class Lord {
   }
 
   get committed(){ let s = 0; for (const a of this.attacks) s += a.troops; return s; }
-  costOf(type){ return Math.round(BUILDS[type].cost * Math.pow(BUILDS[type].step, this.bought[type])); }
+  // What this realm could run in total, if it ran nothing else.
+  get worksCap(){
+    return ECON.WORKS_BASE
+         + ECON.WORKS_ROOT * Math.sqrt(Math.max(0, this.tiles))
+         + ECON.WORKS_PER_TOWN * this.st[B_TOWN].size;
+  }
+  // ...and how many of one kind. Harbours answer to the shore rather than the
+  // ceiling, since a landlocked realm has no use for the allowance.
+  capOf(type){
+    const key = BUILDS[type].key;
+    let n = this.worksCap * (ECON.CAP_SHARE[key] || 0.1);
+    if (type === B_HARBOR) n = Math.min(n, this.coast.size / ECON.CAP_COAST);
+    return Math.max(ECON.CAP_MIN, Math.floor(n));
+  }
+  atCap(type){ return this.st[type].size >= this.capOf(type); }
+  // The price of the next one, set by how full the ceiling already is. An empty
+  // realm builds at the listed price; one at its limit pays several times over;
+  // and raising the ceiling brings the price back down, so the way to build
+  // cheaply is to grow rather than to save.
+  costOf(type){
+    const cap = this.capOf(type);
+    const fill = Math.min(1, this.st[type].size / Math.max(1, cap));
+    return Math.round(BUILDS[type].cost * Math.pow(1 + ECON.COST_FILL * fill, ECON.COST_POW));
+  }
 }
 
 // What a host's armoury is worth on the roll. Quantised to 5% steps so the
@@ -1531,6 +1608,10 @@ class Game {
       if (this.site[t] >= 0) return 'something already stands there';
     }
     if (B.needCoast && !cells.some(t => p.coast.has(t))) return 'a harbour must sit on the shore';
+    // The ceiling. Checked here, in the one place every purchase passes
+    // through — the player's, the AI's and the server's alike — so there is no
+    // route into the game that can build past it.
+    if (p.atCap(type)) return `your realm can run no more than ${p.capOf(type)} — grow it, or raise a town`;
     if (p.ducats < p.costOf(type)) return 'not enough coin';
     return null;
   }
@@ -2011,6 +2092,14 @@ class Game {
     };
     const T = p.tiles;
     const cap = p.jobCap;
+
+    // A lord that has filled its ceiling has one useful thing left to build: a
+    // town, which is what raises the ceiling. Without this the AI spends the
+    // rest of the match asking for farms it cannot have and never works out
+    // why — it would sit at its limit with a full treasury, because every
+    // branch below leads to a kind of work it is already capped on.
+    const wants = [B_FARM, B_FORGE, B_TOWN].filter(b => !p.atCap(b));
+    if (!wants.length && !p.atCap(B_TOWN) && put(B_TOWN, interior(B_TOWN))) return;
     // Build where the priorities say workers should go but there is no work for
     // them: a priority with no building behind it employs nobody.
     // Answer the shortage you actually have. Reading only the worker-demand gap
@@ -2018,7 +2107,11 @@ class Game {
     // coin in the treasury: the gap said "jobs are staffed", the realm said
     // "there is no food and no kit".
     if (p.food < 0 && put(B_FARM, interior(B_FARM))) return;
-    if (p.sold > 200 && p.equip < 0.7 && put(B_FORGE, interior(B_FORGE))) return;
+    // Forges when the *host* is short of kit, not merely the soldiers. A realm
+    // can be fully armed on paper and still be marching a great levy out with
+    // nothing, because the soldiers took the armoury first.
+    const underArmed = p.equip < 0.7 || (p.levy > 400 && p.levyEquip < 0.35);
+    if (p.sold > 200 && underArmed && put(B_FORGE, interior(B_FORGE))) return;
 
     const starved = SECTORS
       .map(sct => ({ sct, gap: p.w[sct] * p.civ - (cap[sct] || 0) }))
