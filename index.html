@@ -605,34 +605,139 @@ function tileAt(px, py){
 }
 
 // -------------------------------------------------------------- map symbols
-function symbol(c, type, x, y, s, col){
+// The seven works, drawn as silhouettes on the map.
+//
+// Each has to be told from the others at a glance, at any zoom, over any
+// tincture — so they are separated by *outline* rather than by detail: a town
+// is wide and gabled, a castle is square and crenellated, a farm has a pitched
+// barn roof and an open door, a forge is an anvil, a harbour an anchor, a siege
+// works a trebuchet's arm, a watchtower a tall thin spire. Interior cuts are
+// punched out in the dark ground colour rather than drawn as lines, which keeps
+// them legible when the whole glyph is only a few pixels across.
+const SITE_DARK = 'rgba(24,18,11,.92)';
+function symbol(c, type, x, y, s, col, stacked){
   c.save(); c.translate(x, y);
-  c.lineWidth = Math.max(1, s * 0.13); c.lineJoin = 'round';
-  c.strokeStyle = 'rgba(15,11,7,.85)'; c.fillStyle = col;
+  c.lineWidth = Math.max(1, s * 0.13); c.lineJoin = 'round'; c.lineCap = 'round';
+  c.strokeStyle = 'rgba(15,11,7,.88)'; c.fillStyle = col;
   const h = s;
-  c.beginPath();
+  const cut = (fn) => { c.fillStyle = SITE_DARK; c.beginPath(); fn(); c.fill(); c.fillStyle = col; };
+
   if (type === B_TOWN){
-    c.moveTo(-h, h*0.7); c.lineTo(-h, -h*0.2); c.lineTo(0, -h); c.lineTo(h, -h*0.2); c.lineTo(h, h*0.7); c.closePath();
+    // a walled town: a long hall behind a low wall, with a gate
+    c.beginPath();
+    c.moveTo(-h, h*0.85); c.lineTo(-h, -h*0.15); c.lineTo(-h*0.45, -h*0.72);
+    c.lineTo(h*0.45, -h*0.72); c.lineTo(h, -h*0.15); c.lineTo(h, h*0.85); c.closePath();
+    c.fill(); c.stroke();
+    cut(() => { c.rect(-h*0.22, h*0.15, h*0.44, h*0.7); });
+    cut(() => { c.rect(-h*0.72, -h*0.32, h*0.3, h*0.28); c.rect(h*0.42, -h*0.32, h*0.3, h*0.28); });
+
   } else if (type === B_CASTLE){
-    c.moveTo(-h, h*0.8); c.lineTo(-h, -h*0.35); c.lineTo(-h*0.55, -h*0.35); c.lineTo(-h*0.55, -h*0.85);
-    c.lineTo(-h*0.18, -h*0.85); c.lineTo(-h*0.18, -h*0.35); c.lineTo(h*0.18, -h*0.35); c.lineTo(h*0.18, -h*0.85);
-    c.lineTo(h*0.55, -h*0.85); c.lineTo(h*0.55, -h*0.35); c.lineTo(h, -h*0.35); c.lineTo(h, h*0.8); c.closePath();
+    // a keep: square, crenellated, with a raised centre tower
+    c.beginPath();
+    c.moveTo(-h, h*0.85); c.lineTo(-h, -h*0.3);
+    c.lineTo(-h*0.62, -h*0.3); c.lineTo(-h*0.62, -h*0.62); c.lineTo(-h*0.28, -h*0.62);
+    c.lineTo(-h*0.28, -h*0.95); c.lineTo(h*0.28, -h*0.95); c.lineTo(h*0.28, -h*0.62);
+    c.lineTo(h*0.62, -h*0.62); c.lineTo(h*0.62, -h*0.3);
+    c.lineTo(h, -h*0.3); c.lineTo(h, h*0.85); c.closePath();
+    c.fill(); c.stroke();
+    cut(() => { c.rect(-h*0.18, h*0.2, h*0.36, h*0.65); });
+
   } else if (type === B_HARBOR){
-    c.arc(0, 0, h*0.85, 0, Math.PI); c.moveTo(0, -h); c.lineTo(0, h*0.85);
-    c.moveTo(-h*0.55, -h*0.6); c.lineTo(h*0.55, -h*0.6);
-    c.strokeStyle = col; c.lineWidth = Math.max(1.2, s*0.3); c.stroke(); c.restore(); return;
+    // An anchor, drawn as a *filled* silhouette rather than strokes. Stroked,
+    // it disappeared the moment the map was zoomed out — thin lines have
+    // nothing left to draw at four pixels across, and the harbour was the one
+    // work you could not find on your own coast.
+    c.beginPath();
+    c.moveTo(-h*0.16, -h*0.62); c.lineTo(h*0.16, -h*0.62);   // shank
+    c.lineTo(h*0.16, h*0.42);
+    c.lineTo(h*0.55, h*0.12);                                 // right fluke
+    c.lineTo(h*0.92, h*0.34);
+    c.lineTo(h*0.5, h*0.86); c.lineTo(0, h*0.99); c.lineTo(-h*0.5, h*0.86);
+    c.lineTo(-h*0.92, h*0.34);                                // left fluke
+    c.lineTo(-h*0.55, h*0.12);
+    c.lineTo(-h*0.16, h*0.42);
+    c.closePath(); c.fill(); c.stroke();
+    c.beginPath();                                            // stock (crossbar)
+    c.moveTo(-h*0.66, -h*0.5); c.lineTo(h*0.66, -h*0.5);
+    c.lineTo(h*0.66, -h*0.22); c.lineTo(-h*0.66, -h*0.22); c.closePath();
+    c.fill(); c.stroke();
+    c.beginPath(); c.arc(0, -h*0.72, h*0.3, 0, Math.PI*2);    // ring
+    c.fill(); c.stroke();
+    cut(() => { c.arc(0, -h*0.72, h*0.12, 0, Math.PI*2); });
+    c.restore();
+    if (stacked > 1) stackBadge(c, x + s * 0.95, y - s * 0.9, s, stacked);
+    return;
+
   } else if (type === B_FARM){
-    c.moveTo(-h, h*0.85); c.lineTo(-h, -h*0.1); c.lineTo(0, -h); c.lineTo(h, -h*0.1); c.lineTo(h, h*0.85); c.closePath();
+    // a barn: steep pitched roof, wide doors
+    c.beginPath();
+    c.moveTo(-h, h*0.85); c.lineTo(-h, -h*0.12); c.lineTo(0, -h*0.95); c.lineTo(h, -h*0.12);
+    c.lineTo(h, h*0.85); c.closePath();
+    c.fill(); c.stroke();
+    cut(() => { c.moveTo(-h*0.34, h*0.85); c.lineTo(-h*0.34, h*0.12);
+                c.lineTo(0, -h*0.16); c.lineTo(h*0.34, h*0.12); c.lineTo(h*0.34, h*0.85); c.closePath(); });
+
   } else if (type === B_FORGE){
-    c.moveTo(-h, h*0.85); c.lineTo(h, h*0.85); c.lineTo(h*0.7, h*0.2); c.lineTo(-h*0.7, h*0.2); c.closePath();
-    c.moveTo(-h*0.3, h*0.2); c.lineTo(-h*0.3, -h*0.5); c.lineTo(h*0.95, -h); c.lineTo(h*0.95, -h*0.45); c.closePath();
+    // an anvil on its block — nothing else on the map has this outline
+    c.beginPath();
+    c.moveTo(-h*0.95, -h*0.35); c.lineTo(h*0.6, -h*0.35);
+    c.lineTo(h*0.95, -h*0.02); c.lineTo(h*0.5, -h*0.02);
+    c.lineTo(h*0.34, h*0.2); c.lineTo(-h*0.34, h*0.2);
+    c.lineTo(-h*0.5, -h*0.02); c.lineTo(-h*0.95, -h*0.05); c.closePath();
+    c.fill(); c.stroke();
+    c.beginPath();
+    c.moveTo(-h*0.5, h*0.2); c.lineTo(-h*0.62, h*0.9); c.lineTo(h*0.62, h*0.9); c.lineTo(h*0.5, h*0.2);
+    c.closePath(); c.fill(); c.stroke();
+
   } else if (type === B_SIEGE){
-    c.moveTo(-h, h*0.8); c.lineTo(h, h*0.8); c.lineTo(h*0.1, -h); c.closePath();
+    // a trebuchet: an A-frame with the throwing arm cocked back
+    c.beginPath();
+    c.moveTo(-h*0.85, h*0.9); c.lineTo(-h*0.1, -h*0.5);
+    c.lineTo(h*0.12, -h*0.5); c.lineTo(h*0.85, h*0.9);
+    c.lineTo(h*0.45, h*0.9); c.lineTo(0, -h*0.05); c.lineTo(-h*0.45, h*0.9); c.closePath();
+    c.fill(); c.stroke();
+    c.beginPath();
+    c.lineWidth = Math.max(1.2, s*0.2); c.strokeStyle = col;
+    c.moveTo(-h*0.75, -h*0.95); c.lineTo(h*0.5, -h*0.2); c.stroke();
+    c.strokeStyle = 'rgba(15,11,7,.88)'; c.lineWidth = Math.max(1, s*0.13);
+    c.beginPath(); c.arc(-h*0.75, -h*0.95, h*0.2, 0, Math.PI*2); c.fill(); c.stroke();
+
   } else {
-    c.moveTo(-h*0.55, h*0.9); c.lineTo(-h*0.55, -h*0.6); c.lineTo(0, -h); c.lineTo(h*0.55, -h*0.6);
-    c.lineTo(h*0.55, h*0.9); c.closePath();
+    // a watchtower: tall and narrow, flared top, a beacon slit
+    c.beginPath();
+    c.moveTo(-h*0.42, h*0.95); c.lineTo(-h*0.34, -h*0.42);
+    c.lineTo(-h*0.62, -h*0.42); c.lineTo(-h*0.62, -h*0.72);
+    c.lineTo(-h*0.3, -h*0.72); c.lineTo(-h*0.3, -h*0.98);
+    c.lineTo(h*0.3, -h*0.98); c.lineTo(h*0.3, -h*0.72);
+    c.lineTo(h*0.62, -h*0.72); c.lineTo(h*0.62, -h*0.42);
+    c.lineTo(h*0.34, -h*0.42); c.lineTo(h*0.42, h*0.95); c.closePath();
+    c.fill(); c.stroke();
+    cut(() => { c.rect(-h*0.14, -h*0.28, h*0.28, h*0.4); });
   }
-  c.fill(); c.stroke(); c.restore();
+  c.restore();
+
+  // How many works stand on this plot. Only shown once there is more than one,
+  // so an ordinary holding stays uncluttered — and in green, which nothing else
+  // on the map uses for a count.
+  if (stacked > 1) stackBadge(c, x + s * 0.95, y - s * 0.9, s, stacked);
+}
+
+// The green count that rides on a built-up plot. Set clear of the glyph's
+// corner rather than on top of it: at map size the badge is nearly as wide as
+// the work it belongs to, and sitting any closer it hid the very thing it was
+// counting.
+function stackBadge(c, x, y, s, n){
+  const r = Math.max(5, Math.min(s * 0.8, 11));
+  c.save();
+  c.globalAlpha = 1;      // the works are drawn faded; the count must not be
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+  c.fillStyle = 'rgba(20,30,14,.92)'; c.fill();
+  c.lineWidth = Math.max(1, r * 0.2); c.strokeStyle = SOLDIER_GREEN; c.stroke();
+  c.fillStyle = '#bfe08a';
+  c.font = `${Math.round(r * 1.15)}px "Iowan Old Style", Palatino, Georgia, serif`;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(String(n), x, y + r * 0.06);
+  c.restore();
 }
 
 // ------------------------------------------------------------------- render
@@ -723,7 +828,8 @@ function render(now){
           // the ground it stands on, then the mark in the middle of it
           c.fillStyle = 'rgba(28,20,10,.20)';
           c.fillRect(sx(x), sy(y), sz * z, sz * z);
-          symbol(c, type, sx(x + sz / 2), sy(y + sz / 2), s * (sz > 2 ? 1.25 : 1), col);
+          symbol(c, type, sx(x + sz / 2), sy(y + sz / 2), s * (sz > 2 ? 1.25 : 1), col,
+                 game.stack[t]);
         }
       }
     }
@@ -914,14 +1020,18 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 cv.addEventListener('contextmenu', e => { e.preventDefault(); openCtx(e.clientX, e.clientY); });
 // --------------------------------------------------------------- tool icons
+// The tray icons are the same seven silhouettes the map draws, redrawn as SVG
+// at 16px: same outline, same read, so a work looks like itself wherever it
+// appears. Interior detail is punched out in the panel's own dark rather than
+// stroked, exactly as on the map.
 const ICON = {
-  town:  '<path d="M2 13V7l6-5 6 5v6z"/>',
-  castle:'<path d="M2 14V4h2.4v2.2h2.2V4h2.8v2.2h2.2V4H16v10z"/>',
-  harbor:'<g fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="3.4" r="1.6"/><path d="M8 5v9M4.6 7h6.8M2.6 10.5a5.6 5.6 0 0 0 10.8 0"/></g>',
-  siege: '<path d="M2 11.6h12v2.2H2z"/><path d="M4.4 9.4h7.2l-1 2.2H5.4z"/><path d="M7 2.4h2v6.4H7z"/><path d="M3.6 3.2h4.2v2.2H3.6z"/>',
-  tower: '<path d="M4.5 15V5.6L8 2l3.5 3.6V15z"/><path d="M6.6 8.4h2.8v3H6.6z" fill="#1d1710"/>',
-  farm:  '<path d="M1 14.2h14v1.6H1z"/><path d="M2.6 13V7.4L8 3.2l5.4 4.2V13z"/><path d="M6.2 13V9.6h3.6V13z" fill="#1d1710"/>',
-  forge: '<path d="M1.6 13.4h12.8v2.2H1.6z"/><path d="M3.8 11.2h8.4l-1.2 2.2H5z"/><path d="M9.4 1.4l4.4 2.4-1 1.8-4.4-2.4z"/><path d="M6.6 4.6h2.2v6.6H6.6z"/>',
+  town:  '<path d="M1.4 14.6V6.9L4.6 3h6.8l3.2 3.9v7.7z"/><path d="M6.6 14.6v-4.2h2.8v4.2z" fill="#1d1710"/><path d="M2.9 7.4h2.2v2.1H2.9zm8 0h2.2v2.1h-2.2z" fill="#1d1710"/>',
+  castle:'<path d="M1.2 14.6V6.2h2.1V4.1h2.4V1.8h4.6v2.3h2.4v2.1h2.1v8.4z"/><path d="M6.7 14.6v-4h2.6v4z" fill="#1d1710"/>',
+  harbor:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="2.9" r="1.5" fill="currentColor"/><path d="M8 4.4v9.4M4.4 6.6h7.2M2.4 9.4a5.8 5.8 0 0 0 11.2 0"/></g>',
+  siege: '<path d="M1.6 14.8 7.4 5.4h1.3l5.7 9.4h-2.6L8 8.1l-3.8 6.7z"/><path d="M2.2 1.6 11 6.9l-.9 1.5L1.3 3.1z"/><circle cx="2.2" cy="2.2" r="1.6"/>',
+  tower: '<path d="M5.1 15.2 5.6 7H3.9V4.6h1.9V2h4.4v2.6h1.9V7h-1.7l.5 8.2z"/><path d="M7 8.3h2v2.8H7z" fill="#1d1710"/>',
+  farm:  '<path d="M1.2 14.8V6.6L8 1.3l6.8 5.3v8.2z"/><path d="M5.4 14.8v-4.4L8 8.4l2.6 2v4.4z" fill="#1d1710"/>',
+  forge: '<path d="M.9 5.2h9.4l2.9 2.6h-3l-1.4 1.9H5.2L3.8 7.9.9 8z"/><path d="M4.4 9.9h7.2l1.1 4.9H3.3z"/>',
   road:  '<path d="M1.4 15 6 1h4l4.6 14h-3.2L8 3.6 5 15z"/><path d="M7.2 6h1.6v2H7.2zM7.2 9.5h1.6v2H7.2z" fill="#1d1710"/>',
   ram:   '<path d="M1 7.4h10.5v3.2H1z"/><path d="M11.5 6.2h3.4v5.6h-3.4z"/><circle cx="3.6" cy="13.2" r="1.7"/><circle cx="9.4" cy="13.2" r="1.7"/>',
   camp:  '<path d="M4.6 2.8 9.2 13.4H0z"/><path d="M11.2 5.6 16 13.4H6.4z"/>',
@@ -964,7 +1074,7 @@ function toolCost(t){
 function toolReady(t){
   const me = game.players[game.humanId];
   if (me.ducats < toolCost(t)) return false;
-  if (t.kind === 'siege' && !me.st[B_SIEGE].size) return false;
+  if (t.kind === 'siege' && !me.cnt[B_SIEGE]) return false;
   if ((t.kind === 'ship' || t.kind === 'galley') && !me.coast.size) return false;
   return true;
 }
@@ -1079,7 +1189,7 @@ function renderTray(){
     // price rather than being discovered by a refusal.
     let tally = '';
     if (t.kind === 'build' && me){
-      const have = me.st[t.arg].size, cap = me.capOf(t.arg);
+      const have = me.cnt[t.arg], cap = me.capOf(t.arg);
       tally = `<span class="cap ${have >= cap ? 'full' : ''}">${have} / ${cap}</span>`;
     }
     return `<button class="item ${toolReady(t) ? '' : 'off'}" data-i="${i}">${svg(t.k)}
@@ -1274,7 +1384,7 @@ function openCtx(px, py){
     for (const type of B_ALL){
       const B = BUILDS[type];
       const ok = !game.canPlace(me.id, t, type);
-      const have = me.st[type].size, cap = me.capOf(type), full = have >= cap;
+      const have = me.cnt[type], cap = me.capOf(type), full = have >= cap;
       // What you hold of this kind against what the realm can run. Shown on the
       // order itself, so the ceiling is visible at the moment it stops you
       // rather than only in the tray.
@@ -1299,7 +1409,7 @@ function openCtx(px, py){
     rows.push(sworn ? mi('break', null, 'Break the pact', null, true)
                     : mi('ally',  null, 'Offer an alliance', null, true));
     rows.push(mi('look', null, 'Look upon their lands', null, true));
-    if (me.st[B_SIEGE].size){
+    if (me.cnt[B_SIEGE]){
       rows.push('<div class="msep"></div>');
       for (const k of ['ram', 'treb', 'camp'])
         rows.push(mi('siege:' + k, k, 'Lay a ' + SIEGE[k].name.toLowerCase(), SIEGE[k].cost, me.ducats >= SIEGE[k].cost));
@@ -1403,8 +1513,8 @@ function updateHUD(){
   // without opening a tray. Red once a kind is full.
   const parts = [];
   for (const b of B_ALL){
-    if (!me.st[b].size) continue;
-    const have = me.st[b].size, cap = me.capOf(b);
+    if (!me.cnt[b]) continue;
+    const have = me.cnt[b], cap = me.capOf(b);
     parts.push(`<span style="color:${have >= cap ? '#c05b4d' : 'inherit'}">${have}/${cap}</span> ${BUILDS[b].name}`);
   }
   $('sbld').innerHTML = parts.length ? parts.join(', ') : '—';
@@ -1641,7 +1751,9 @@ function onServerState(m){
     if (m.full) for (let t = 0; t < game.N; t++){ if (game.owner[t] !== m.owners[t]) game.setOwner(t, m.owners[t]); }
     else for (let i = 0; i < m.owners.length; i += 2) game.setOwner(m.owners[i], m.owners[i + 1]);
   }
-  if (m.builds) for (let i = 0; i < m.builds.length; i += 2) applyBuild(m.builds[i], m.builds[i + 1]);
+  // triples now: tile, kind, how many stand there
+  if (m.builds) for (let i = 0; i < m.builds.length; i += 3)
+    applyBuild(m.builds[i], m.builds[i + 1], m.builds[i + 2]);
   if (m.roads){
     for (const p of game.players){ p.roads = []; p.netDirty = true; }
     for (let i = 0; i < m.roads.length; i += 3){
@@ -1666,12 +1778,25 @@ function onServerState(m){
   for (const e of m.events || []) toast(e.text, e.kind);
 }
 
-function applyBuild(tile, type){
+// A plot arrives as tile, kind and how many stand on it. The count has to be
+// carried into `cnt` as well as `stack`, or the client draws the right icon and
+// still reads the realm's economy short — fifteen farms on one plot are fifteen
+// farms' worth of food, and the panel must agree with the server about that.
+function applyBuild(tile, type, n){
   const o = game.owner[tile], old = game.build[tile];
-  if (old && o >= 0) game.players[o].st[old].delete(tile);
+  if (old && o >= 0){
+    const p = game.players[o];
+    p.st[old].delete(tile);
+    p.cnt[old] = Math.max(0, p.cnt[old] - Math.max(1, game.stack[tile]));
+  }
   if (old === B_CASTLE && type !== B_CASTLE) game.stampCastle(tile, -1);
   game.build[tile] = type;
-  if (type && o >= 0) game.players[o].st[type].add(tile);
+  game.stack[tile] = type ? Math.max(1, n | 0) : 0;
+  if (type && o >= 0){
+    const p = game.players[o];
+    p.st[type].add(tile);
+    p.cnt[type] += game.stack[tile];
+  }
   if (type === B_CASTLE && old !== B_CASTLE) game.stampCastle(tile, 1);
   game.dirty.push(tile);
 }
@@ -1687,9 +1812,14 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.16.0';
+const VERSION = '0.17.0';
 
 const CHANGELOG = [
+  { v:'0.17.0', when:'building up', notes:[
+    '<b>A plot can be built up as well as out.</b> Raise a second farm on a farm you already hold and it joins the first — up to <b>15</b> on one plot. Land stops being the wall it was: a small island can hold a realm now. The ceiling above still decides how many works you run in total, so this buys you room, never scale.',
+    '<b>A built-up plot carries a green count.</b> One icon, one number, however many stand there — and the plot changes hands, or comes down, with everything on it.',
+    '<b>All seven works are redrawn.</b> A town is gabled, a castle crenellated, a farm a pitched barn, a blacksmith an anvil, a harbour an anchor, a siege works a trebuchet, a watchtower a spire — each told apart by its outline rather than its detail, so they still read when the map is zoomed out. The harbour in particular used to vanish entirely at distance; it was drawn in thin lines with nothing left to show at four pixels across.',
+  ]},
   { v:'0.16.0', when:'what a realm can run', notes:[
     '<b>A realm can only run so many works.</b> Coin is no longer the only thing standing between you and a hundred farms — every kind of work has a ceiling, and the ceiling grows with the realm. A new holding runs three farms; a great power runs seventy. You cannot buy your way past it.',
     '<b>Towns raise the ceiling.</b> That is what makes them worth building beyond their trade: they are how a realm earns the right to build anything else. Growing is now the way to build cheaply, rather than hoarding.',
@@ -2107,8 +2237,8 @@ const HERALD = {
 
     { at: 'Raise a farm',
       why: 'Farms make food, food makes people, and people are the whole game — every soldier, every ducat, every field you will ever take comes out of your population. <b>A realm that builds nothing stays small no matter how well it fights.</b>',
-      go:  'Open <b>Works</b> below, choose <b>Farm</b>, and place it on your own ground (it needs 3×3).',
-      done: () => me().st[B_FARM].size >= 1 },
+      go:  'Open <b>Works</b> below, choose <b>Farm</b>, and place it on your own ground (3×3 — or on a farm you already have, to build it up).',
+      done: () => me().cnt[B_FARM] >= 1 },
 
     { at: 'Claim open ground',
       why: 'Empty land has no defenders, so taking it is settlement rather than battle: the men you send <b>mostly stay as farmers on the new land</b>. This is how a realm grows, and it is cheap — while the land lasts.',
@@ -2121,12 +2251,12 @@ const HERALD = {
     { at: 'Raise a blacksmith',
       why: 'Forges are the only source of arms, and <b>arms decide battles</b>. Every field taken from a lord is rolled for by both sides, and each 5% armed adds 0.05 to your roll — a full armoury rolls +1.00 against a rabble\'s nothing.',
       go:  'Open <b>Works</b> and place a <b>Blacksmith</b> (2×2).',
-      done: () => me().st[B_FORGE].size >= 1 },
+      done: () => me().cnt[B_FORGE] >= 1 },
 
     { at: 'Raise a town',
       why: 'Towns turn labour into ducats, and ducats are what let you <b>muster an army at all</b> — every man called above your peasant levy is paid for as he is raised. Towns also earn far more when roads join them to your other works.',
       go:  'Open <b>Works</b> and place a <b>Town</b> (3×3), near what you already hold.',
-      done: () => me().st[B_TOWN].size >= 1 },
+      done: () => me().cnt[B_TOWN] >= 1 },
 
     { at: 'Mobilise',
       why: 'You always have a peasant levy for nothing. Mobilising calls up men <b>above</b> it — they take time to train, arms to equip, and coin as they are raised. <b>Going to war competes with everything else your coin buys</b>, which is the whole decision.',
@@ -2374,7 +2504,7 @@ function showOver(){
     : (w ? w.name + ' takes the crown' : 'the realm lies empty');
   $('ovText').innerHTML = won
     ? `You held <b>${share(me)}%</b> of the realm after ${mins}m ${secs}s, with ${fmt(me.pop)} under arms
-       and ${me.st[B_TOWN].size + me.st[B_CASTLE].size + me.st[B_HARBOR].size} works standing.`
+       and ${me.cnt[B_TOWN] + me.cnt[B_CASTLE] + me.cnt[B_HARBOR]} works standing.`
     : fell
     ? `${me.name} was broken after ${mins}m ${secs}s, holding ${fmt(me.peak)} at its height.
        ${w ? `<b>${w.name}</b> now holds ${share(w)}% of the realm.` : ''}`

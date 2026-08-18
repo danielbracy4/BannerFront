@@ -176,6 +176,49 @@ console.log('  arms reach the levy, even though the levy cannot arm itself');
   ok(p.levyQuality <= p.quality || p.levyEquip >= p.equip, 'a levy is never worth more than a soldier of the same kit');
 }
 
+// ------------------------------------------------------------- building up
+// A plot can carry more than one work now, which means two numbers exist where
+// there used to be one: the plots a lord has built on, and the works standing
+// on them. Every rule that means "how many farms" has to read the second. The
+// checks below are the ones that would silently mint or destroy works.
+console.log('');
+console.log('  a plot can be built up');
+{
+  const g = c.makeMatch({ bots: 3, humanSeats: 0, preset: 'continents', seed: 5 });
+  const A = g.players[0], B = g.players[1];
+  let seat = -1;
+  for (let y = 30; y < g.H - 40 && seat < 0; y++){
+    for (let x = 30; x < g.W - 40; x++){
+      let clear = true;
+      for (let dy = 0; dy < 26 && clear; dy++)
+        for (let dx = 0; dx < 26; dx++)
+          if (g.terrain[(y+dy)*g.W + (x+dx)] < 2){ clear = false; break; }
+      if (clear){ seat = y * g.W + x; break; }
+    }
+  }
+  g.seat(A, seat);
+  for (let dy = 0; dy < 26; dy++) for (let dx = 0; dx < 26; dx++) g.setOwner(seat + dy*g.W + dx, A.id);
+  g.audit(); A.ducats = 1e9; A.tiles = 4000;
+  const plot = seat + 5 * g.W + 5;
+
+  ok(g.place(A.id, plot, c.B_FARM) === null, 'a farm is raised on an empty plot');
+  for (let i = 0; i < 40; i++){ A.ducats = 1e9; g.place(A.id, plot, c.B_FARM); }
+  ok(g.stack[plot] === c.ECON.STACK_MAX, `the plot builds up to ${g.stack[plot]} and stops`);
+  ok(A.cnt[c.B_FARM] === c.ECON.STACK_MAX, `all ${A.cnt[c.B_FARM]} of them count as farms`);
+  ok(A.st[c.B_FARM].size === 1, 'while standing on a single plot');
+  const why = g.canPlace(A.id, plot, c.B_FARM);
+  ok(/no more than/.test(why || ''), `one more is refused ("${why}")`);
+  ok(A.jobCap.farm === c.ECON.STACK_MAX * c.ECON.JOBS_FARM,
+     `and the economy feels all of them (${A.jobCap.farm.toLocaleString()} field hands)`);
+
+  const held = A.cnt[c.B_FARM];
+  B.alive = true; g.setOwner(plot, B.id);
+  ok(B.cnt[c.B_FARM] === held && A.cnt[c.B_FARM] === 0,
+     `taking the plot takes all ${held} farms with it, and leaves none behind`);
+  g.raze(plot);
+  ok(B.cnt[c.B_FARM] === 0 && g.stack[plot] === 0, 'razing it takes down everything standing there');
+}
+
 console.log('');
 console.log(fails ? `  ${fails} check(s) failed\n` : '  all capacity checks passed\n');
 process.exit(fails ? 1 : 0);

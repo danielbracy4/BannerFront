@@ -232,6 +232,23 @@ the way to build more.
 | 2,500 | 76 | 32 | 19 | 15 |
 | 10,000 | 164 | 68 | 42 | 32 |
 
+**A plot can be built up as well as out.** Raise a second work of the same kind
+on a plot already carrying one and it joins it, up to `STACK_MAX` (15). Land
+therefore stops being the wall it was — a small island can hold a realm — while
+the ceiling above still decides how many works exist, so building up buys room
+and never scale.
+
+That splits one number into two, and the split is where the bugs live:
+`p.st[kind]` is the set of **plots** built on, `p.cnt[kind]` is how many **works**
+stand on them. Everything that means "how many farms" — food, jobs, upkeep, the
+ceiling, the price, the panel — reads `cnt`; everything that means "where are
+they" — roads, the network, castle radius, rendering — reads `st`. A plot
+changes hands with its whole pile, and razing takes the pile down; moving the
+plot without its count would quietly destroy works on one side and mint them on
+the other. Online, the build delta carries `[tile, kind, howMany]` for the same
+reason — a client told only the kind would draw one work where fifteen stand and
+read the realm's economy short.
+
 **Capacity gates construction, never possession.** Ground taken from a lord comes
 with the works standing on it, and those keep working however far over your
 ceiling they put you — you simply cannot raise more of that kind until the realm

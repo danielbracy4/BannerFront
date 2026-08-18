@@ -274,7 +274,10 @@ class Room {
     let builds = null;
     if (full){
       builds = [];
-      for (let i = 0; i < g.N; i++) if (g.build[i]) builds.push(i, g.build[i]);
+      // tile, kind, and how many stand on it — a plot can be built up, and a
+      // client that only heard the kind would draw one work where there are
+      // fifteen and count the realm's economy short.
+      for (let i = 0; i < g.N; i++) if (g.build[i]) builds.push(i, g.build[i], g.stack[i]);
       g.buildDirty.length = 0;
     } else if (g.buildDirty.length){
       builds = [];
@@ -282,7 +285,7 @@ class Room {
       for (const t of g.buildDirty){
         if (seen.has(t)) continue;
         seen.add(t);
-        builds.push(t, g.build[t]);
+        builds.push(t, g.build[t], g.stack[t]);
       }
       g.buildDirty.length = 0;
     }

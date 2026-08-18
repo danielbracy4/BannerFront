@@ -238,6 +238,12 @@ const ECON = {
   CAP_COAST:        22,     // ...and a harbour wants this many coastal fields
   CAP_MIN:          1,      // every realm may always run one of anything
 
+  // A plot can be built up rather than out: raise a second farm on the same
+  // ground and it joins the first. Land stops being the hard wall on an economy
+  // — a small island can hold a realm — while the ceiling above still decides
+  // how many works there are in total, so this buys space and never scale.
+  STACK_MAX:        15,
+
   // How the price rises as a realm fills its ceiling. Cheap while there is
   // room, dear at the limit — and *cheaper again* once the ceiling rises, so
   // growing the realm is what makes building affordable rather than hoarding.
@@ -761,7 +767,14 @@ class Lord {
     this.tiles = 0; this.peak = 0; this.sumX = 0; this.sumY = 0;
     this.border = new Set();   // own land touching foreign/open land
     this.coast  = new Set();   // own land touching water
+    // `st` holds the *plots* a lord has built on; `cnt` holds how many works
+    // actually stand there. They used to be the same number, because a plot
+    // held exactly one work. Now a plot can be built up — see STACK_MAX — so a
+    // realm with six farm plots may be running fifteen farms, and every rule
+    // that means "how many farms" has to read `cnt` while everything that means
+    // "where are they" keeps reading `st`.
     this.st = { 1:new Set(), 2:new Set(), 3:new Set(), 4:new Set(), 5:new Set(), 6:new Set(), 7:new Set() };
+    this.cnt = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0 };
     this.bought = { 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0 };  // for price escalation
     this.allies = new Set();
     this.pact = new Map();     // id -> the hour the oath lapses
@@ -815,10 +828,10 @@ class Lord {
   get levyEquip(){ return this.levy > 0 ? Math.min(1, this.levyArms / this.levy) : 0; }
   get levyQuality(){ return ECON.UNARMED + (1 - ECON.UNARMED) * this.levyEquip; }
   get jobCap(){
-    const t = this.st[B_TOWN].size, h = this.st[B_HARBOR].size;
+    const t = this.cnt[B_TOWN], h = this.cnt[B_HARBOR];
     return {
-      farm:  this.st[B_FARM].size  * ECON.JOBS_FARM,
-      forge: this.st[B_FORGE].size * ECON.JOBS_FORGE,
+      farm:  this.cnt[B_FARM]  * ECON.JOBS_FARM,
+      forge: this.cnt[B_FORGE] * ECON.JOBS_FORGE,
       trade: t * ECON.JOBS_TOWN + h * ECON.JOBS_HARBOR,
       works: t * ECON.JOBS_WORKS,
     };
@@ -925,7 +938,7 @@ class Lord {
   get worksCap(){
     return ECON.WORKS_BASE
          + ECON.WORKS_ROOT * Math.sqrt(Math.max(0, this.tiles))
-         + ECON.WORKS_PER_TOWN * this.st[B_TOWN].size;
+         + ECON.WORKS_PER_TOWN * this.cnt[B_TOWN];
   }
   // ...and how many of one kind. Harbours answer to the shore rather than the
   // ceiling, since a landlocked realm has no use for the allowance.
@@ -935,14 +948,14 @@ class Lord {
     if (type === B_HARBOR) n = Math.min(n, this.coast.size / ECON.CAP_COAST);
     return Math.max(ECON.CAP_MIN, Math.floor(n));
   }
-  atCap(type){ return this.st[type].size >= this.capOf(type); }
+  atCap(type){ return this.cnt[type] >= this.capOf(type); }
   // The price of the next one, set by how full the ceiling already is. An empty
   // realm builds at the listed price; one at its limit pays several times over;
   // and raising the ceiling brings the price back down, so the way to build
   // cheaply is to grow rather than to save.
   costOf(type){
     const cap = this.capOf(type);
-    const fill = Math.min(1, this.st[type].size / Math.max(1, cap));
+    const fill = Math.min(1, this.cnt[type] / Math.max(1, cap));
     return Math.round(BUILDS[type].cost * Math.pow(1 + ECON.COST_FILL * fill, ECON.COST_POW));
   }
 }
@@ -1139,7 +1152,8 @@ class Game {
     this.build   = new Uint8Array(this.N);
     this.elev    = new Uint8Array(this.N);
     this.castleField = new Uint8Array(this.N);
-    this.site = new Int32Array(this.N).fill(-1);   // tile -> the work standing on it
+    this.site = new Int32Array(this.N).fill(-1);   // tile -> the plot the work stands on
+    this.stack = new Uint8Array(this.N);           // plot -> how many works are on it
     this.breachField = new Uint8Array(this.N);
     this._bfs = new Int32Array(this.N);    // BFS parent, reused
     this._bfsStamp = new Int32Array(this.N);
@@ -1322,17 +1336,21 @@ class Game {
     const from = this.owner[t];
     if (from === to) return;
     const b = this.build[t];
+    // A plot changes hands with everything standing on it — all fifteen farms
+    // if fifteen is what was there. Moving the plot but not its count would
+    // quietly destroy works on one side and mint them on the other.
+    const onPlot = b ? Math.max(1, this.stack[t]) : 0;
     if (from >= 0){
       const p = this.players[from];
       p.tiles--; p.sumX -= t % this.W; p.sumY -= (t / this.W) | 0;
       p.border.delete(t); p.coast.delete(t);
-      if (b){ p.st[b].delete(t); p.netDirty = true; this.roadDirty = true; }
+      if (b){ p.st[b].delete(t); p.cnt[b] = Math.max(0, p.cnt[b] - onPlot); p.netDirty = true; this.roadDirty = true; }
     }
     this.owner[t] = to;
     if (to >= 0){
       const p = this.players[to];
       p.tiles++; p.sumX += t % this.W; p.sumY += (t / this.W) | 0;
-      if (b){ p.st[b].add(t); p.netDirty = true; this.roadDirty = true; }
+      if (b){ p.st[b].add(t); p.cnt[b] += onPlot; p.netDirty = true; this.roadDirty = true; }
     }
     this.dirty.push(t);
     const nb = this._nb || (this._nb = new Int32Array(4));
@@ -1600,6 +1618,24 @@ class Game {
 
   canPlace(ownerId, tile, type){
     const p = this.players[ownerId], B = BUILDS[type];
+    // The ceiling and the purse are asked first: they apply whether the work is
+    // going on fresh ground or onto a plot that already carries its own kind.
+    const afford = () => {
+      if (p.atCap(type)) return `your realm can run no more than ${p.capOf(type)} — grow it, or raise a town`;
+      if (p.ducats < p.costOf(type)) return 'not enough coin';
+      return null;
+    };
+
+    // Building *up* rather than out: a plot already carrying this kind of work
+    // takes another onto the same ground. Checked before the footprint rules,
+    // because those exist to stop two works sharing a field — and here that is
+    // exactly what is wanted.
+    if (this.build[tile] === type && this.owner[tile] === ownerId){
+      if (this.stack[tile] >= ECON.STACK_MAX)
+        return `no more than ${ECON.STACK_MAX} may stand on one plot`;
+      return afford();
+    }
+
     const cells = this.footprint(tile, B.size);
     if (!cells) return 'there is not room for it there';
     for (const t of cells){
@@ -1608,22 +1644,27 @@ class Game {
       if (this.site[t] >= 0) return 'something already stands there';
     }
     if (B.needCoast && !cells.some(t => p.coast.has(t))) return 'a harbour must sit on the shore';
-    // The ceiling. Checked here, in the one place every purchase passes
-    // through — the player's, the AI's and the server's alike — so there is no
-    // route into the game that can build past it.
-    if (p.atCap(type)) return `your realm can run no more than ${p.capOf(type)} — grow it, or raise a town`;
-    if (p.ducats < p.costOf(type)) return 'not enough coin';
-    return null;
+    return afford();
   }
 
   place(ownerId, tile, type){
     const err = this.canPlace(ownerId, tile, type);
     if (err) return err;
     const p = this.players[ownerId], B = BUILDS[type];
+    p.ducats -= p.costOf(type); p.bought[type]++; p.cnt[type]++;
+
+    // Adding to a plot that already carries this kind: no new ground is taken
+    // and no road changes, only the count on the plot goes up.
+    if (this.build[tile] === type){
+      this.stack[tile]++;
+      this.dirty.push(tile); this.buildDirty.push(tile);
+      return null;
+    }
+
     const cells = this.footprint(tile, B.size);
-    p.ducats -= p.costOf(type); p.bought[type]++;
     for (const t of cells){ this.site[t] = tile; this.dirty.push(t); }
-    this.build[tile] = type; p.st[type].add(tile); p.netDirty = true; this.roadDirty = true;
+    this.build[tile] = type; this.stack[tile] = 1;
+    p.st[type].add(tile); p.netDirty = true; this.roadDirty = true;
     if (type === B_CASTLE) this.stampCastle(tile, 1);
     this.dirty.push(tile); this.buildDirty.push(tile);
     return null;
@@ -1633,7 +1674,13 @@ class Game {
     const b = this.build[tile];
     if (!b) return;
     const o = this.owner[tile];
-    if (o >= 0){ this.players[o].st[b].delete(tile); this.players[o].netDirty = true; this.roadDirty = true; }
+    // Razing a plot takes down everything standing on it, not one of the pile.
+    if (o >= 0){
+      const p = this.players[o];
+      p.cnt[b] = Math.max(0, p.cnt[b] - Math.max(1, this.stack[tile]));
+      p.st[b].delete(tile); p.netDirty = true; this.roadDirty = true;
+    }
+    this.stack[tile] = 0;
     if (b === B_CASTLE) this.stampCastle(tile, -1);
     const cells = this.footprint(tile, BUILDS[b].size) || [tile];
     for (const t of cells){ if (this.site[t] === tile){ this.site[t] = -1; this.dirty.push(t); } }
@@ -1859,11 +1906,11 @@ class Game {
     if (this._tradeT < 1) return;
     this._tradeT = 0;
     for (const p of this.players){
-      if (!p.alive || p.st[B_HARBOR].size === 0) continue;
+      if (!p.alive || p.cnt[B_HARBOR] === 0) continue;
       if (this.time < p.tradeAt) continue;
-      p.tradeAt = this.time + 14 / Math.min(4, p.st[B_HARBOR].size) + this.rand() * 6;
+      p.tradeAt = this.time + 14 / Math.min(4, p.cnt[B_HARBOR]) + this.rand() * 6;
       const partners = this.players.filter(q =>
-        q.alive && q.id !== p.id && q.st[B_HARBOR].size > 0 && !this.atWar(p.id, q.id));
+        q.alive && q.id !== p.id && q.cnt[B_HARBOR] > 0 && !this.atWar(p.id, q.id));
       if (!partners.length) continue;
       const q = partners[(this.rand() * partners.length) | 0];
       this.sail('trade', p.id, pickFrom(p.st[B_HARBOR], this.rand), pickFrom(q.st[B_HARBOR], this.rand), 0);
@@ -1895,7 +1942,7 @@ class Game {
   // fields are breached for the assault that has to follow.
   raise(ownerId, kind, tile){
     const p = this.players[ownerId], S = SIEGE[kind];
-    if (!p.st[B_SIEGE].size) return 'you have no Siege Works';
+    if (!p.cnt[B_SIEGE]) return 'you have no Siege Works';
     if (p.ducats < S.cost) return 'not enough coin';
     if (this.owner[tile] !== ownerId) return 'a siege is laid from your own ground';
     if (!p.border.has(tile)) return 'lay it on your frontier, facing the enemy';
@@ -1926,7 +1973,7 @@ class Game {
       // a watchtower in sight lets the garrison harry the besiegers
       let wear = 1;
       for (const q of this.players){
-        if (!q.alive || q.id === s.owner || !q.st[B_TOWER].size) continue;
+        if (!q.alive || q.id === s.owner || !q.cnt[B_TOWER]) continue;
         for (const tw of q.st[B_TOWER]){
           if (Math.hypot(tw % this.W - s.tile % this.W,
                          ((tw / this.W) | 0) - ((s.tile / this.W) | 0)) < S.r + 8){ wear = 2; break; }
@@ -1986,7 +2033,7 @@ class Game {
       this.log(`Your pact with ${other.name} has lapsed`, '', other.id);
     }
   }
-  power(p){ return p.tiles + p.sold / 25 + p.pop / 90 + p.st[B_TOWN].size * 30; }
+  power(p){ return p.tiles + p.sold / 25 + p.pop / 90 + p.cnt[B_TOWN] * 30; }
 
   // Would this bot say yes to `from`?
   //
@@ -2062,7 +2109,22 @@ class Game {
       }
       return -1;
     };
+    // Building up on a plot already held is cheaper in ground than clearing a
+    // new 3x3, and it keeps the realm's works together on the road network. A
+    // lord tries it first, and only goes looking for fresh ground when every
+    // plot of that kind is full. Without this the AI would never build up at
+    // all — it only ever asked for empty ground.
+    const onExisting = type => () => {
+      const plots = [...p.st[type]];
+      for (let k = 0; k < 6 && plots.length; k++){
+        const t = plots[(this.rand() * plots.length) | 0];
+        if (this.stack[t] < ECON.STACK_MAX && !this.canPlace(p.id, t, type)) return t;
+      }
+      return -1;
+    };
     const interior = type => () => {
+      const built = onExisting(type)();
+      if (built >= 0 && this.rand() < 0.55) return built;   // often, not always
       const nodes = p.nodes;
       if (nodes.length){
         const t = near(nodes[(this.rand() * nodes.length) | 0], type);
@@ -2132,15 +2194,15 @@ class Game {
       }
     }
     if (p.idle > 60 && put(B_TOWN, interior(B_TOWN))) return;
-    if (p.ducats > 1500 * (1.2 - p.greed) && p.st[B_CASTLE].size < T / 240 && put(B_CASTLE, () => fromSet(p.border, B_CASTLE))) return;
-    if (p.coast.size > 6 && p.st[B_HARBOR].size < 1 + T / 650 && put(B_HARBOR, () => fromSet(p.coast, B_HARBOR))) return;
-    if (T > 340 && p.ducats > 5200 && p.st[B_SIEGE].size < 2 && put(B_SIEGE, interior(B_SIEGE))) return;
-    if (p.ducats > 4200 && p.st[B_TOWER].size < 1 + T / 850 && put(B_TOWER, interior(B_TOWER))) return;
+    if (p.ducats > 1500 * (1.2 - p.greed) && p.cnt[B_CASTLE] < T / 240 && put(B_CASTLE, () => fromSet(p.border, B_CASTLE))) return;
+    if (p.coast.size > 6 && p.cnt[B_HARBOR] < 1 + T / 650 && put(B_HARBOR, () => fromSet(p.coast, B_HARBOR))) return;
+    if (T > 340 && p.ducats > 5200 && p.cnt[B_SIEGE] < 2 && put(B_SIEGE, interior(B_SIEGE))) return;
+    if (p.ducats > 4200 && p.cnt[B_TOWER] < 1 + T / 850 && put(B_TOWER, interior(B_TOWER))) return;
     if (p.ducats > 2800 && put(B_TOWN, interior(B_TOWN))) return;
   }
 
   botSiege(p, ring){
-    if (!p.st[B_SIEGE].size) return false;
+    if (!p.cnt[B_SIEGE]) return false;
     // Without a cooldown, late-game lords with deep coffers shell the map
     // continuously and the realm decays into open ground faster than anyone
     // can retake it — no one can then reach a winning share.
@@ -2182,10 +2244,10 @@ class Game {
   // no AI ever built a galley, so the whole naval game only existed if a human
   // happened to buy one.
   botGalley(p){
-    if (!p.coast.size || !p.st[B_HARBOR].size) return false;
+    if (!p.coast.size || !p.cnt[B_HARBOR]) return false;
     if (p.ducats < 1400) return false;
     const have = this.boats.filter(b => !b.dead && b.kind === 'galley' && b.owner === p.id).length;
-    if (have >= Math.min(3, 1 + (p.st[B_HARBOR].size >> 1))) return false;
+    if (have >= Math.min(3, 1 + (p.cnt[B_HARBOR] >> 1))) return false;
     if (this.rand() > 0.35) return false;
     const from = pickFrom(p.coast, this.rand);
     if (from < 0) return false;
@@ -2429,7 +2491,7 @@ class Game {
     // --- food and population ---
     const sFarm = p.staffing('farm'), sForge = p.staffing('forge'), sTrade = p.staffing('trade');
     const produced = p.tiles * ECON.FOOD_PER_TILE
-                   + p.st[B_FARM].size * ECON.YIELD_FARM_FOOD * sFarm;
+                   + p.cnt[B_FARM] * ECON.YIELD_FARM_FOOD * sFarm;
     const eaten = p.pop * ECON.FOOD_PER_HEAD;
     p.food = produced - eaten;
     p.starving = p.food < 0;
@@ -2446,15 +2508,15 @@ class Game {
     }
 
     // --- forges make arms; nothing else does ---
-    p.armsRate = p.st[B_FORGE].size * ECON.YIELD_FORGE_ARMS * sForge;
+    p.armsRate = p.cnt[B_FORGE] * ECON.YIELD_FORGE_ARMS * sForge;
     p.arms += p.armsRate * dt;
 
     // --- ducats ---
-    const income = (p.st[B_TOWN].size * ECON.YIELD_TOWN_TRADE
-                  + p.st[B_HARBOR].size * ECON.YIELD_HARBOR_TRADE) * sTrade * (1 + p.linkBonus)
+    const income = (p.cnt[B_TOWN] * ECON.YIELD_TOWN_TRADE
+                  + p.cnt[B_HARBOR] * ECON.YIELD_HARBOR_TRADE) * sTrade * (1 + p.linkBonus)
                   + p.civ * ECON.TAX_PER_CIV + p.tiles * ECON.DUCAT_PER_TILE;
     let works = 0;
-    for (const b of B_ALL) works += p.st[b].size;
+    for (const b of B_ALL) works += p.cnt[b];   // upkeep is paid per work, stacked or not
     const upkeep = p.sold * ECON.UPKEEP_SOLDIER + p.levy * ECON.UPKEEP_LEVY
                  + works * ECON.UPKEEP_BUILD;
     p.income = income; p.upkeep = upkeep;
