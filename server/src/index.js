@@ -80,6 +80,15 @@ function api(req, res){
     // So the title screen can offer only the sign-ins this server can honour,
     // rather than a button that redirects into an apology.
     if (url === '/api/providers') return send(200, { ledger: db.enabled, ...auth.providers }), true;
+    // The standing muster, for the title screen to show before anyone joins.
+    if (url === '/api/lobby'){
+      const r = openLobby();
+      return send(200, {
+        seconds: r.secondsLeft, players: r.humanCount, capacity: r.capacity,
+        lords: r.targetLords, ai: r.aiFill, map: r.preset,
+        waiting: r.humanCount === 0,
+      }), true;
+    }
     return send(404, { err: 'no such scroll' }), true;
   }
   if (req.method !== 'POST') return send(405, { err: 'wrong method' }), true;
@@ -135,22 +144,30 @@ const io = new Server(server, {
 // ------------------------------------------------------------------- rooms
 const rooms = new Map();
 
-// One lobby gathers players at a time; when it starts, the next arrival opens
-// a fresh one. That is what makes the 60-second countdown meaningful instead of
-// leaving the first player waiting for a full house.
+// There is always exactly one lobby standing open, whether or not anybody is in
+// it, so the title screen can show a live muster to a player who has not joined
+// anything yet. It used to be created on the first join, which meant there was
+// nothing to look at until you had already committed to playing.
+//
+// Exactly one: this is the only place a Room is made, and it hands back the
+// existing open lobby if there is one. Two lobbies would mean two countdowns
+// racing each other and players split between them.
 function openLobby(){
   for (const r of rooms.values()) if (r.phase === 'lobby') return r;
-  // The room decides its own map and its own AI count; nothing is passed in.
   const r = new Room(io, {});
   rooms.set(r.id, r);
   return r;
 }
+openLobby();      // one is standing from the moment the server boots
 
 setInterval(() => {
   for (const [id, r] of rooms){
     if (r.phase === 'done'){ r.close(); rooms.delete(id); }
   }
-}, 30000);
+  // A lobby that has marched off to war leaves no muster behind it; open the
+  // next one straight away rather than waiting for somebody to ask.
+  openLobby();
+}, 5000);
 
 io.on('connection', socket => {
   if (!originOk(socket.handshake.headers.origin)){

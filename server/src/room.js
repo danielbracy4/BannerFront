@@ -23,9 +23,9 @@ const LOBBY_SECS   = Math.max(1, +process.env.BANNERFRONT_LOBBY_SECS || CFG.LOBB
 const PLACE_SECS   = 25;               // time to choose your ground
 const PLACE_MIN    = 16;               // fields between rival standards
 const MAX_HUMANS   = CFG.MAX_HUMANS;   // seats at the table; the lobby is full at this
-const AI_MIN       = CFG.AI_MIN;
-const AI_MAX       = CFG.AI_MAX;
-const MAX_LORDS    = MAX_HUMANS + AI_MAX;
+const LORDS_MIN    = CFG.LORDS_MIN;    // the *total* size of a match, humans included
+const LORDS_MAX    = CFG.LORDS_MAX;
+const MAX_LORDS    = LORDS_MAX;
 
 let nextRoomId = 1;
 
@@ -37,11 +37,13 @@ class Room {
     // can be brought back by changing this line; they are simply not offered.
     this.preset = 'europe';
     this.seed = (Math.random() * 1e9) | 0;
-    // Rolled once, here, when the lobby opens — and never again. Everything
-    // downstream reads this number rather than deciding for itself how many
-    // lords the machine should run.
-    this.aiCount = AI_MIN + Math.floor(Math.random() * (AI_MAX - AI_MIN + 1));
-    this.capacity = MAX_HUMANS;
+    // Rolled once, here, when the lobby opens — and never again. This is how
+    // many lords the *match* will hold, humans included; the machine fills
+    // whatever the players do not take. Everything downstream reads it rather
+    // than deciding for itself.
+    this.targetLords = LORDS_MIN + Math.floor(Math.random() * (LORDS_MAX - LORDS_MIN + 1));
+    // A lobby never holds more players than the match has room for.
+    this.capacity = Math.min(MAX_HUMANS, this.targetLords);
 
     this.phase = 'lobby';              // lobby -> placing -> war -> done
     this.seats = [];                   // { socketId, name, colour, lordId }
@@ -58,10 +60,24 @@ class Room {
   get secondsLeft(){ return Math.max(0, Math.ceil((this.startsAt - Date.now()) / 1000)); }
   get humanCount(){ return this.seats.length; }
   get isFull(){ return this.seats.length >= this.capacity; }
+  // What the machine has to supply to reach the size this match was set at.
+  // Humans take slots first; this is only ever the remainder.
+  get aiFill(){ return Math.max(0, this.targetLords - this.seats.length); }
   // The only two ways a match may begin. Both are decided here, on the clock
   // the server itself opened the lobby by — a client has no say in either.
-  get mayStart(){ return this.phase === 'lobby' && (this.isFull || this.secondsLeft <= 0); }
-  get startReason(){ return this.isFull ? 'full' : this.secondsLeft <= 0 ? 'expired' : null; }
+  //
+  // An empty lobby never starts. It is standing open all the time now, so
+  // without this the server would spin up a fresh forty-lord match against
+  // nobody every sixty seconds, for ever. When the clock runs out on an empty
+  // room it simply winds back and goes on waiting — see lobbyTick.
+  get mayStart(){
+    if (this.phase !== 'lobby' || !this.seats.length) return false;
+    return this.isFull || this.secondsLeft <= 0;
+  }
+  get startReason(){
+    if (!this.seats.length) return null;
+    return this.isFull ? 'full' : this.secondsLeft <= 0 ? 'expired' : null;
+  }
 
   // ------------------------------------------------------------------ lobby
   addSeat(socket, name, colour, accountId){
@@ -99,7 +115,8 @@ class Room {
       seconds: this.secondsLeft,
       humans: this.seats.map(s => ({ name: s.name, colour: s.colour })),
       capacity: this.capacity,
-      ai: this.aiCount,              // decided when the lobby opened, and fixed
+      lords: this.targetLords,       // total size of the match, decided at open
+      ai: this.aiFill,               // ...and how much of it the machine takes
       map: this.preset,
       starting: this.startReason,    // 'full' | 'expired' | null
     });
@@ -107,6 +124,16 @@ class Room {
 
   lobbyTick(){
     if (this.phase !== 'lobby') return;
+    // The clock ran out with nobody here: wind it back and keep the doors open,
+    // rather than starting a war nobody came to.
+    if (!this.seats.length && this.secondsLeft <= 0){
+      this.openedAt = Date.now();
+      this.startsAt = this.openedAt + LOBBY_SECS * 1000;
+      // A fresh wait is a fresh match: roll its size again.
+      this.targetLords = LORDS_MIN + Math.floor(Math.random() * (LORDS_MAX - LORDS_MIN + 1));
+      this.capacity = Math.min(MAX_HUMANS, this.targetLords);
+      this.seed = (Math.random() * 1e9) | 0;
+    }
     this.sendLobby();
     if (this.mayStart) this.begin();
   }
@@ -122,8 +149,10 @@ class Room {
     this.startedBecause = this.startReason;
 
     // Human seats are reserved *alongside* the AI rather than carved out of
-    // them, so the count of lords the machine runs is exactly this.aiCount.
-    const g = makeMatch({ bots: this.aiCount, humanSeats: this.seats.length,
+    // them, so the match holds exactly targetLords: the players who joined,
+    // and the machine filling the rest.
+    const fill = this.aiFill;
+    const g = makeMatch({ bots: fill, humanSeats: this.seats.length,
                           preset: this.preset, seed: this.seed });
     this.game = g;
     g.humanId = -1;                    // no single privileged human on the server
@@ -233,7 +262,8 @@ class Room {
 
     const ai = g.players.filter(p => p.bot && p.alive).length;
     console.log(`  room ${this.id}: ${this.preset}, ${this.seats.length} human, ` +
-                `${ai} AI (asked for ${this.aiCount}), started because ${this.startedBecause}`);
+                `${ai} AI (target ${this.targetLords} lords), ` +
+                `started because ${this.startedBecause}`);
     g.phase = 'war';
     this.io.to(this.id).emit('war', { lords: g.aliveCount });
     const step = 1 / TICK_HZ;
@@ -440,4 +470,4 @@ class Room {
   }
 }
 
-module.exports = { Room, LOBBY_SECS, TICK_HZ, BROADCAST_HZ, MAX_LORDS, MAX_HUMANS, AI_MIN, AI_MAX };
+module.exports = { Room, LOBBY_SECS, TICK_HZ, BROADCAST_HZ, MAX_LORDS, MAX_HUMANS, LORDS_MIN, LORDS_MAX };

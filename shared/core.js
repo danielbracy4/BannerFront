@@ -127,11 +127,13 @@ const CFG = {
   YEAR_SECS:      12,      // seconds of match time to the year
 
   // --- how many lords ---
-  // Every match runs somewhere between these many AI lords, rolled once when
-  // the lobby opens and honoured exactly. Shared rather than server-only so a
-  // solo match and an online one are the same size of war.
-  AI_MIN:         40,
-  AI_MAX:         90,
+  // The size of the war, rolled once when the lobby opens. This is the *total*
+  // number of lords in the match — humans take slots first and the machine
+  // fills whatever is left, so a target of 60 with 4 players means 56 AI, not
+  // 64 lords. Confusing the two is how a lobby ends up quietly larger than it
+  // says it is.
+  LORDS_MIN:      20,
+  LORDS_MAX:      90,
   MAX_HUMANS:     12,      // seats at the table before a lobby is full
   LOBBY_SECS:     60,      // ...and how long it waits for them
 };
@@ -306,6 +308,39 @@ const ECON = {
 // Fixed archetypes never delivered the trade-offs they promised anyway — one of
 // the four won every match, before and after the levy was priced.
 const START_W = { farm:0.40, forge:0.24, trade:0.26, works:0.10 };
+
+// Not every lord is the same lord. Each one is dealt a **skill** and a **bent**,
+// and between them they decide how well it plays and what it is trying to do.
+//
+// Skill is competence, never a hidden bonus: a poor lord thinks less often,
+// waits longer before it is satisfied it is ready, over-commits its host and
+// forgets to keep a garrison. It is beatable because it plays badly, not
+// because the game quietly weakened it. No tier is handed extra men, coin,
+// arms or output — check `applyGrade` below, it only ever moves *decisions*.
+//
+// Bent is what the lord wants. A `settler` would rather take empty ground than
+// fight; a `raider` goes at its neighbours early; a `builder` puts works up and
+// defends them; a `warlord` is the one that plays the way every lord used to.
+// Roughly one in seven is a warlord, so a match has a few real threats in it
+// rather than ninety.
+const GRADES = [
+  // share, name,      skill, and how much of the field is dealt this grade
+  { w: 0.26, name: 'raw',       skill: 0.22 },
+  { w: 0.34, name: 'ordinary',  skill: 0.48 },
+  { w: 0.26, name: 'seasoned',  skill: 0.72 },
+  { w: 0.14, name: 'formidable',skill: 0.95 },
+];
+const BENTS = [
+  { w: 0.30, name: 'settler', aggr: 0.35, greed: 1.15, expand: 1.9 },
+  { w: 0.24, name: 'builder', aggr: 0.55, greed: 1.35, expand: 1.2 },
+  { w: 0.32, name: 'raider',  aggr: 1.45, greed: 0.75, expand: 0.7 },
+  { w: 0.14, name: 'warlord', aggr: 1.7,  greed: 0.9,  expand: 0.8 },
+];
+const dealFrom = (table, r) => {
+  let x = r() * table.reduce((s, t) => s + t.w, 0);
+  for (const t of table){ x -= t.w; if (x <= 0) return t; }
+  return table[table.length - 1];
+};
 
 // A siege is laid, not launched. Each of these is a camp raised on your own
 // frontier that invests the ground in front of it: walls come down, the
@@ -794,6 +829,14 @@ class Lord {
     this.aggr  = 0.25 + r() * 0.7;   // how readily it attacks
     this.greed = 0.25 + r() * 0.7;   // build vs. levy
     this.loyal = 0.2  + r() * 0.75;  // alliance behaviour
+    // ...and the grade and bent that shape all three
+    const grade = dealFrom(GRADES, r), bent = dealFrom(BENTS, r);
+    this.grade = grade.name;
+    this.skill = grade.skill;
+    this.bent  = bent.name;
+    this.aggr   = Math.min(1, this.aggr * bent.aggr);
+    this.greed  = Math.min(1, this.greed * bent.greed);
+    this.expand = bent.expand;       // how much it prefers empty ground to a war
     // Every realm is run the same way. What differs is temperament above and
     // whether it has troubled to get ready before it marches.
     this.w = { farm:START_W.farm, forge:START_W.forge, trade:START_W.trade, works:START_W.works };
@@ -2304,6 +2347,17 @@ class Game {
 
   // Is this lord in a state to open a war? Men called up and actually come in,
   // arms for them, and coin in hand to keep them there. All three, or it waits.
+  //
+  // The bar is the same for every lord, deliberately.
+  //
+  // It was briefly scaled by skill — a formidable lord waiting for a full
+  // armoury while a raw one marched half-equipped — on the assumption that
+  // caution is competence. Measured head to head on identical ground, it is the
+  // opposite: waiting hands the early ground away, and the careful lord was
+  // sometimes overrun before it ever moved. Across twelve duels the "better"
+  // lord finished holding 0.91x the ground of the worse one. Skill has to live
+  // somewhere it genuinely helps — dithering, garrison discipline and
+  // over-commitment, all below — and not in a rule that punishes it.
   warReady(p){
     return p.sold >= ECON.WAR_HOST * p.pop
         && p.equip >= ECON.WAR_EQUIP
@@ -2355,6 +2409,11 @@ class Game {
   }
 
   botThink(p){
+    // A poor lord dithers: it looks at the realm, decides nothing in
+    // particular, and lets the moment pass. A formidable one never does. This
+    // is a wasted turn rather than a broken one — the realm goes on running,
+    // the lord simply fails to act on it.
+    if (p.skill != null && this.rand() > 0.45 + p.skill * 0.55) return;
     this.botFeed(p);
     this.botBuild(p);
     this.botMobilise(p);
@@ -2398,7 +2457,7 @@ class Game {
     for (const [o, c] of ring){
       if (o >= 0 && p.allies.has(o)) continue;
       let w;
-      if (o < 0) w = c * (1.7 + (1 - p.aggr) * 0.9);
+      if (o < 0) w = c * (1.7 + (1 - p.aggr) * 0.9) * (p.expand || 1);
       else {
         const q = this.players[o]; if (!q.alive) continue;
         w = c * ((p.density + 1) / (q.density + 1)) * (0.45 + p.aggr)
@@ -2416,6 +2475,13 @@ class Game {
       if (w > bestW){ bestW = w; bestT = o; }
     }
     if (bestT === null){ this.botNaval(p); return; }
+
+    // Poor discipline shows up further down, in how much of the host a lord
+    // commits and how little it keeps behind the walls. It used to be expressed
+    // here by latching `wantWar` on — which was a mistake rather than a
+    // weakness: the flag never cleared, so a raw lord mobilised for ever, spent
+    // every coin on musters and finished a whole match having built one work.
+    // Weak has to still mean playing.
 
     // Claiming open ground is not a war: no defenders, no preparation, and the
     // map would never be settled if it needed a war chest.
@@ -2445,8 +2511,13 @@ class Game {
       // already committed more than we hold in reserve — see the fight we are
       // in through before starting another
       if (p.committed > p.sold * 1.2) return;
-      ratio *= Math.max(0.30, 1 - 0.30 * pressed);
+      // A seasoned lord holds a real garrison back. A raw one barely thinks
+      // about it and marches out with the walls behind it empty, which is a
+      // door left open for whoever is patient enough to use it.
+      ratio *= Math.max(0.30, 1 - 0.30 * pressed * (0.35 + p.skill * 0.9));
     }
+    // ...and over-commits even when nobody is at the gate.
+    ratio = Math.min(0.95, ratio * (1.22 - p.skill * 0.22));
     this.launch(p.id, bestT, p.sold * ratio);
   }
 
@@ -2597,7 +2668,11 @@ class Game {
 
     for (const p of this.players){
       if (p.alive && p.bot && this.time >= p.nextThink){
-        p.nextThink = this.time + 1.4 + this.rand() * 2.6;
+        // A raw lord looks up from its own affairs less often than a formidable
+        // one. This is most of what "worse" means here: it is not given less,
+        // it simply misses its moment. Kept mild — at a large multiplier the
+        // poor lords stop functioning altogether rather than playing badly.
+        p.nextThink = this.time + (1.4 + this.rand() * 2.6) * (1.45 - p.skill * 0.5);
         this.botThink(p);
       }
     }

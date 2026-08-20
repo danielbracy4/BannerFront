@@ -8,7 +8,7 @@
 // "random" scatter that quietly stacks two standards on one field. Each is
 // checked against the real objects rather than against what the screen says.
 const path = require('path');
-const { Room, LOBBY_SECS, MAX_HUMANS, AI_MIN, AI_MAX } = require('../server/src/room.js');
+const { Room, LOBBY_SECS, MAX_HUMANS, LORDS_MIN, LORDS_MAX } = require('../server/src/room.js');
 const core = require('../shared/core.js');
 
 const GAMES = +(process.argv[2] || 5);
@@ -38,9 +38,15 @@ console.log('  a lobby runs its minute');
   ok(r.secondsLeft > LOBBY_SECS - 3 && r.secondsLeft <= LOBBY_SECS,
      `and starts a ${LOBBY_SECS}s countdown (${r.secondsLeft}s left)`);
   ok(!r.mayStart, 'it may not start straight away');
+  // An empty lobby stands open for ever rather than marching off alone.
+  r.startsAt = Date.now() - 1;
+  ok(!r.mayStart, 'and an empty lobby never starts, even at zero');
+  r.lobbyTick();
+  ok(r.phase === 'lobby' && r.secondsLeft > LOBBY_SECS - 3,
+     `instead the clock winds back and it keeps waiting (${r.secondsLeft}s)`);
 
   r.addSeat(fakeSocket('a'), 'First Lord', null, null);
-  ok(!r.mayStart, 'nor when the first player joins');
+  ok(!r.mayStart, 'nor does it start the moment the first player joins');
   r.begin();
   ok(r.phase === 'lobby', 'and calling begin() outright does nothing — the door is guarded');
 
@@ -95,9 +101,10 @@ for (let n = 1; n <= GAMES; n++){
   const humans = n % 4;                            // 0..3 players in the lobby
   for (let i = 0; i < humans; i++) r.addSeat(fakeSocket('h' + i), 'Player ' + i, null, null);
 
-  const asked = r.aiCount;
+  const asked = r.targetLords;          // total size of the match
   counts.push(asked);
-  const rolledAgain = r.aiCount;
+  const rolledAgain = r.targetLords;
+  const fill = r.aiFill;                // what the machine must supply
 
   r.startsAt = Date.now() - 1;                     // expire it and let it run
   r.begin();
@@ -123,10 +130,10 @@ for (let n = 1; n <= GAMES; n++){
   console.log('  ' + pad(n, 6) + pad(humans, 8) + pad(asked, 7) + pad(actualAI, 11) +
               pad(g.players.length, 13) + pad(seats.length, 12) + pad(dupes, 12));
 
-  ok(asked >= AI_MIN && asked <= AI_MAX, `  game ${n}: ${asked} AI is within ${AI_MIN}–${AI_MAX}`);
+  ok(asked >= LORDS_MIN && asked <= LORDS_MAX, `  game ${n}: a match of ${asked} lords is within ${LORDS_MIN}–${LORDS_MAX}`);
   ok(rolledAgain === asked, `  game ${n}: the count is not re-rolled when read again`);
-  ok(actualAI === asked, `  game ${n}: ${actualAI} AI actually exist against ${asked} configured`);
-  ok(g.players.length === asked + humans, `  game ${n}: ${g.players.length} lords = ${asked} AI + ${humans} human`);
+  ok(actualAI === fill, `  game ${n}: ${actualAI} AI actually exist against ${fill} needed to fill`);
+  ok(g.players.length === asked, `  game ${n}: ${g.players.length} lords total = ${humans} human + ${fill} AI`);
   ok(dupes === 0, `  game ${n}: no two lords share a starting field`);
   ok(seats.length === g.players.length, `  game ${n}: every lord received ground`);
   ok(planted.length === g.players.length, `  game ${n}: every lord was planted exactly once`);
@@ -196,6 +203,12 @@ console.log('  Novgorod');
   // match on the first tick and every check after that fails for want of a
   // game rather than for want of Novgorod.
   const lord = g.players[0], rival = g.players[1];
+  // Drive both by hand. They are ordinary bots otherwise, and two live bots
+  // sharing a border will go to war on their own schedule — which ate the rival
+  // during the expansion step and ended the match before the conquest check
+  // ever ran. What is being tested is whether the ground *can* be taken, not
+  // what the AI chooses to do with it.
+  lord.bot = false; rival.bot = false;
   g.seat(lord, t); g.audit();
   ok(lord.tiles > 0 && g.owner[t] === lord.id, `a lord can be seated there (${lord.tiles} fields)`);
 
@@ -238,9 +251,9 @@ console.log('  Novgorod');
 
   // enough room for the largest match the lobby can ask for
   const g3 = core.makeMatch({ bots: 90, humanSeats: MAX_HUMANS, preset: 'europe', seed: 5 });
-  const most = g3.pickSeats(AI_MAX + MAX_HUMANS);
-  ok(most.length === AI_MAX + MAX_HUMANS,
-     `Europe seats the largest possible match (${most.length} of ${AI_MAX + MAX_HUMANS})`);
+  const most = g3.pickSeats(LORDS_MAX);
+  ok(most.length === LORDS_MAX,
+     `Europe seats the largest possible match (${most.length} of ${LORDS_MAX})`);
   ok(new Set(most).size === most.length, 'with no field dealt twice');
 }
 

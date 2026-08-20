@@ -55,6 +55,12 @@
   #heraldWhy b{color:#d9c48d;font-weight:400}
   #heraldDo{color:#8fae62;font-size:12px}
   #heraldDo.done{color:#c9a227}
+  /* While the tutorial is waiting on an order the war is standing still, and
+     that has to look deliberate rather than broken. */
+  #herald.teaching{border-color:#4a5c2d}
+  #heraldWait{margin-top:7px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+              color:#c9a227;display:none}
+  #herald.waiting #heraldWait{display:block}
   #myflag{display:flex;align-items:center;gap:9px;margin-bottom:9px}
   #myswatch{width:16px;height:20px;flex:0 0 16px;border:1px solid rgba(0,0,0,.6);
     clip-path:polygon(0 0,100% 0,100% 100%,50% 82%,0 100%)}
@@ -281,6 +287,16 @@
                  margin-bottom:2px}
   #lobbystate{font-size:12.5px;letter-spacing:.1em;color:#a89566;text-align:center;width:100%}
   #lobbystate.go{color:var(--gold)}
+  /* The standing muster on the title card. Set out like a notice pinned to the
+     door rather than a control — nothing here is clickable. */
+  #muster{border:1px solid #3a2f1c;background:#181410;padding:10px 13px 9px;margin:0 0 12px;
+          display:flex;align-items:center;gap:14px}
+  #musterHead{display:flex;flex-direction:column;gap:3px;flex:1;text-align:left}
+  #musterHead span{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8e7a4f}
+  #musterHead b{color:#e9dcba;font-weight:400}
+  #musterClock{font-size:30px;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1}
+  #musterNote{font-size:10.5px;letter-spacing:.1em;color:#7b6a45;text-align:right;max-width:120px}
+  #muster.go #musterClock{color:#8fae62}
   /* A fact, set out like the inputs beside it but not one of them. */
   .fldstatic{background:#181410;border:1px solid #3a2f1c;padding:7px 9px;color:#8e7a4f;
              font-size:12.5px;letter-spacing:.03em}
@@ -351,6 +367,7 @@
     <div id="heraldWhat"></div>
     <div id="heraldWhy"></div>
     <div id="heraldDo"></div>
+    <div id="heraldWait">The war waits on you</div>
   </div>
   <div id="banner"><div class="t"></div><div class="s"></div></div>
 </div>
@@ -364,11 +381,11 @@
        Take <b id="wintxt">65%</b> of the realm, or be the last banner flying.</p>
     <div class="fields">
       <div class="fld"><label>Your house</label><input id="inName" maxlength="18" placeholder="House Vareth"></div>
-      <!-- How many rivals is no longer a setting: every match rolls its own
-           number of lords when the muster opens, so no two wars are the same
-           size. The lobby shows the count once it is decided. -->
-      <div class="fld"><label>Rival lords</label>
-        <div id="inBots" class="fldstatic">40–90, drawn at the muster</div>
+      <!-- How many lords is no longer a setting: every match rolls its own size
+           when the muster opens, so no two wars are the same. That number is
+           the whole field — players first, the machine filling the rest. -->
+      <div class="fld"><label>Lords in the war</label>
+        <div id="inBots" class="fldstatic">20–90, drawn at the muster</div>
       </div>
       <!-- Europe is the only realm in rotation while it is being tuned. The
            other presets still exist in shared/core.js and are simply not
@@ -380,9 +397,25 @@
       </div>
       <div class="fld" style="flex:1 1 100%"><label>Colours</label><div id="swatches"></div></div>
     </div>
+    <!-- The standing muster. A lobby is always open on the server, so it is
+         shown here before anyone has committed to anything — you can see who is
+         waiting and how long is left without first starting one yourself. -->
+    <div id="muster" style="display:none">
+      <div id="musterHead">
+        <span id="musterMap">EUROPE</span>
+        <span id="musterWho">—</span>
+        <span id="musterLords">—</span>
+      </div>
+      <div id="musterClock">—</div>
+      <div id="musterNote">the muster stands open</div>
+    </div>
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
       <button class="cta" id="btnPlay">Muster online</button>
       <button class="cta" id="btnSolo" style="border-color:#5c4c2d;color:#c3b590">Play alone</button>
+    </div>
+    <div style="display:flex;justify-content:center;margin-top:9px">
+      <button class="cta" id="btnTutor"
+              style="border-color:#4a5c2d;color:#a9c98a;padding:8px 26px;font-size:12px">Learn to play</button>
     </div>
     <div id="ledgerBox" style="margin-top:12px;padding-top:10px;border-top:1px solid #3a2f1c;font-size:12.5px;color:#a89566">
       <span id="ledgerIn">
@@ -404,9 +437,6 @@
       <div id="acMsg" style="margin-top:4px;min-height:14px;color:#c98a4b"></div>
       <div class="hint" style="margin-top:2px">an account keeps your record in online wars — solo play needs none</div>
     </div>
-    <label class="hint" style="display:block;margin-top:8px;cursor:pointer">
-      <input type="checkbox" id="cbHerald" style="vertical-align:-2px"> the herald teaches — guided first war (solo)
-    </label>
     <div class="hint">drag to pan · scroll to zoom · left-click to march · right-click for orders</div>
     <div class="build" id="buildlab">—</div>
   </div>
@@ -462,6 +492,10 @@ const cv = $('map'), ctx = cv.getContext('2d', { alpha: false });
 
 let game = null, mapCv = null, mapCtx = null, mapImg = null, baseRGB = null;
 let capitalMarks = null;   // where the powers will rise, shown during placement
+let wantTutorial = false;  // set by "Learn to play", read once when the match opens
+// How far past the map's edge the camera may travel, as a share of half the
+// viewport. Enough that an edge realm can sit in the middle of the screen.
+const EDGE_PAD = 0.75;
 // Levies are gold and soldiers are green, everywhere the two appear — the
 // people bar, the banners on the map, the panel. Both are lifted from the
 // palette already in use rather than invented: the gold is the one the levy
@@ -590,7 +624,20 @@ function clampCam(){
   if (!isFinite(cam.x)) cam.x = game.W / 2;
   if (!isFinite(cam.y)) cam.y = game.H / 2;
   const z = cam.z, halfW = innerWidth / 2 / z, halfH = innerHeight / 2 / z;
-  const mx = Math.max(0, game.W / 2 - halfW), my = Math.max(0, game.H / 2 - halfH);
+  // A buffer of open sea past the coastline, so a lord seated on the edge of
+  // the map can put their own land in the middle of the screen. Without it the
+  // camera stopped dead at the map bounds: everything you owned was jammed into
+  // the side of the window, half of it behind the panels, and the only way to
+  // look at your own realm was to zoom all the way in.
+  //
+  // Only the *view* is widened. The map, the coordinates and every rule that
+  // reads them are untouched, so this cannot create playable ground — sx/sy and
+  // tileAt are unchanged, and there is nothing out there but the sea colour the
+  // renderer already paints behind the map.
+  const padX = Math.min(halfW * EDGE_PAD, game.W / 2);
+  const padY = Math.min(halfH * EDGE_PAD, game.H / 2);
+  const mx = Math.max(0, game.W / 2 - halfW) + padX;
+  const my = Math.max(0, game.H / 2 - halfH) + padY;
   cam.x = Math.min(game.W / 2 + mx, Math.max(game.W / 2 - mx, cam.x));
   cam.y = Math.min(game.H / 2 + my, Math.max(game.H / 2 - my, cam.y));
 }
@@ -1812,9 +1859,19 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 
 const CHANGELOG = [
+  { v:'0.18.0', when:'the muster, the tutorial and the field', notes:[
+    '<b>A muster always stands open.</b> The title screen shows it before you commit to anything — the realm, who is waiting, how big the war will be, and the clock. You no longer start a lobby; you join the one that is already running.',
+    'An empty muster <b>never marches</b>. If the minute runs out with nobody there the clock winds back and a fresh war is drawn, rather than the server fighting itself.',
+    '<b>Every war is a different size</b>, between 20 and 90 lords, drawn when the muster opens. Players take places first and the machine fills whatever is left — four players in a war of sixty means fifty-six AI, not sixty-four lords.',
+    '<b>Learn to play</b> is its own way in now, not a tick-box on an ordinary game. The herald holds the war still while it waits on an order, so you can read the instruction without the map moving underneath you, and lets it run again the moment you have given it.',
+    '<b>The map has a shore to look at.</b> A lord seated on the edge could not put their own land in the middle of the screen — the camera stopped dead at the coastline and everything you owned was jammed against the window. There is open sea past the edge now: at a middling zoom an edge realm gained twenty-four fields of breathing room.',
+    '<b>Not every lord is the same lord.</b> Each is dealt a calibre — raw, ordinary, seasoned, formidable — and a bent: settlers take empty ground, raiders go at their neighbours, builders raise works and hold them, warlords do what every lord used to. About one in seven is a warlord, so a war has a few real threats in it rather than ninety.',
+    'A poor lord is poor because it <b>plays badly</b>, not because it was quietly weakened: it dithers, over-commits, and leaves its walls thin. Every lord starts a match with exactly the same men, coin and arms.',
+  ]},
+
   { v:'0.17.0', when:'building up', notes:[
     '<b>A plot can be built up as well as out.</b> Raise a second farm on a farm you already hold and it joins the first — up to <b>15</b> on one plot. Land stops being the wall it was: a small island can hold a realm now. The ceiling above still decides how many works you run in total, so this buys you room, never scale.',
     '<b>A built-up plot carries a green count.</b> One icon, one number, however many stand there — and the plot changes hands, or comes down, with everything on it.',
@@ -2084,6 +2141,7 @@ function openLobby(solo){
     NET.sock = null; NET.online = false; NET.myLord = -1; NET.seated = false;
   }
   onlineLobby = !solo;
+  MUSTER.stop();          // the title card is going away; so does its poll
   $('start').style.display = 'none';
   $('lobby').style.display = 'flex';
   $('verlab').textContent = 'v' + VERSION;
@@ -2229,15 +2287,20 @@ let chosenColor = PALETTE[1];
 const HERALD_KEY = 'bannerfront.heraldSeen';
 const HERALD = {
   on: false, i: 0, shown: -1,
+  // Set when the player came in through "Learn to play" rather than starting an
+  // ordinary solo match. Only then does the herald take hold of the clock.
+  tutorial: false,
   steps: [
     { at: 'Plant your standard',
       why: 'Where you plant decides who you must fight. The faded names are the powers of the age, and they will rise where they stand — <b>Iberia and Italy seat five crowns each; the Russian steppe seats two</b>. A quiet corner buys you the time to build.',
       go:  'Click open land to plant your banner.',
+      hold: true,
       done: () => game.phase === 'war' && me().tiles > 0 },
 
     { at: 'Raise a farm',
       why: 'Farms make food, food makes people, and people are the whole game — every soldier, every ducat, every field you will ever take comes out of your population. <b>A realm that builds nothing stays small no matter how well it fights.</b>',
       go:  'Open <b>Works</b> below, choose <b>Farm</b>, and place it on your own ground (3×3 — or on a farm you already have, to build it up).',
+      hold: true,
       done: () => me().cnt[B_FARM] >= 1 },
 
     { at: 'Claim open ground',
@@ -2246,21 +2309,29 @@ const HERALD = {
       // You start on 21 fields, and one confident march with the opening host
       // takes you to the middle thirties. A tutorial step should clear on one
       // decisive action, not leave a new player marching twice and wondering.
-      done: () => me().tiles >= 30 },
+      //
+      // Cleared by the *order*, not by the ground arriving: this step holds the
+      // clock, and an advance needs the clock to run. Waiting for 30 fields
+      // while nothing ticks would wedge the tutorial shut.
+      hold: true,
+      done: () => game.attacks.some(a => !a.dead && a.owner === game.humanId) || me().tiles >= 30 },
 
     { at: 'Raise a blacksmith',
       why: 'Forges are the only source of arms, and <b>arms decide battles</b>. Every field taken from a lord is rolled for by both sides, and each 5% armed adds 0.05 to your roll — a full armoury rolls +1.00 against a rabble\'s nothing.',
       go:  'Open <b>Works</b> and place a <b>Blacksmith</b> (2×2).',
+      hold: true,
       done: () => me().cnt[B_FORGE] >= 1 },
 
     { at: 'Raise a town',
       why: 'Towns turn labour into ducats, and ducats are what let you <b>muster an army at all</b> — every man called above your peasant levy is paid for as he is raised. Towns also earn far more when roads join them to your other works.',
       go:  'Open <b>Works</b> and place a <b>Town</b> (3×3), near what you already hold.',
+      hold: true,
       done: () => me().cnt[B_TOWN] >= 1 },
 
     { at: 'Mobilise',
       why: 'You always have a peasant levy for nothing. Mobilising calls up men <b>above</b> it — they take time to train, arms to equip, and coin as they are raised. <b>Going to war competes with everything else your coin buys</b>, which is the whole decision.',
       go:  'Open <b>Realm</b> below and raise <b>Mobilise</b> above 20%.',
+      hold: true,
       done: () => me().mobil > 0.2 },
 
     { at: 'Watch your arms',
@@ -2271,6 +2342,7 @@ const HERALD = {
     { at: 'Make war',
       why: 'Now it is worth it. Both sides roll for every field, both sides bleed, and the ground only moves if you win the exchange. <b>Defending needs no orders</b> — your standing army does it for you, wherever you are.',
       go:  'Left-click a rival\'s land to march on it — or right-click for the full orders.',
+      hold: true,
       done: () => game.attacks.some(a => !a.dead && a.owner === game.humanId && a.target >= 0) },
 
     { at: 'The realm is yours to lose',
@@ -2279,16 +2351,33 @@ const HERALD = {
       done: () => false },
   ],
 
-  begin(){
+  begin(tutorial){
     this.on = true; this.i = 0; this.shown = -1;
+    this.tutorial = !!tutorial;
     $('herald').style.display = 'block';
+    $('herald').classList.toggle('teaching', this.tutorial);
     $('heraldOff').onclick = () => this.stop(true);
     this.paint();
   },
   stop(remember){
-    this.on = false;
+    this.on = false; this.tutorial = false;
     $('herald').style.display = 'none';
+    $('herald').classList.remove('teaching');
     if (remember){ try { localStorage.setItem(HERALD_KEY, '1'); } catch(e){} }
+  },
+
+  // Is the war waiting on the player right now?
+  //
+  // Only in the tutorial, and only on steps that ask for an order — plant a
+  // banner, raise a work, give a command. Steps that ask you to *wait* for
+  // something (levies training, arms coming off the forges) obviously cannot
+  // hold the clock still, or the thing they are waiting for could never happen.
+  // That is what `hold` marks.
+  get held(){
+    if (!this.on || !this.tutorial || !game || game.humanId < 0) return false;
+    const s = this.steps[this.i];
+    if (!s || !s.hold) return false;
+    try { return !s.done(); } catch(e){ return false; }
   },
   paint(){
     if (this.shown === this.i) return;
@@ -2309,6 +2398,7 @@ const HERALD = {
     let moved = false;
     while (this.i < this.steps.length - 1 && this.steps[this.i].done()){ this.i++; moved = true; }
     this.paint();
+    $('herald').classList.toggle('waiting', this.held);
     if (moved) $('heraldWhat').animate(
       [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], 260);
   },
@@ -2393,10 +2483,40 @@ const LEDGER = {
   },
 };
 
+// The muster standing open on the server, polled while the title card is up.
+// It is a notice, not a control: joining it is still the "Muster online"
+// button. Polling stops the moment the card is hidden, so a match never carries
+// a background timer with it.
+const MUSTER = {
+  timer: null,
+  start(){
+    if (this.timer) return;
+    const tick = async () => {
+      if (getComputedStyle($('start')).display === 'none') return;
+      let m = null;
+      try { m = await LEDGER.call('lobby'); } catch(e){ m = null; }
+      const box = $('muster');
+      if (!m || m.seconds == null){ box.style.display = 'none'; return; }
+      box.style.display = 'flex';
+      $('musterMap').innerHTML = (m.map || 'europe').toUpperCase();
+      $('musterWho').innerHTML = `Waiting <b>${m.players}</b> / ${m.capacity}`;
+      $('musterLords').innerHTML = `War of <b>${m.lords}</b> lords · ${m.ai} by the machine`;
+      $('musterClock').textContent = m.seconds;
+      // An empty muster never marches: the clock winds back and it waits again.
+      $('musterNote').textContent = m.waiting
+        ? 'waiting for a first lord' : 'the horn sounds at zero';
+      box.classList.toggle('go', !m.waiting);
+    };
+    tick();
+    this.timer = setInterval(tick, 1000);
+  },
+  stop(){ if (this.timer){ clearInterval(this.timer); this.timer = null; } },
+};
+
 function setupStart(){
   $('wintxt').textContent = '50–65%';
+  MUSTER.start();
   // Ticked by default until the herald has been through once.
-  try { $('cbHerald').checked = localStorage.getItem(HERALD_KEY) !== '1'; } catch(e){ $('cbHerald').checked = true; }
   $('btnAcIn').onclick  = () => LEDGER.enter('login');
   $('btnAcUp').onclick  = () => LEDGER.enter('signup');
   $('btnAcOut').onclick = async () => { await LEDGER.call('logout', {}); LEDGER.save(''); LEDGER.account = null; LEDGER.show('signed out'); };
@@ -2421,9 +2541,12 @@ function setupStart(){
   $('inName').value = makeHouseName(Math.random);
   $('btnPlay').onclick = () => openLobby(false);
   $('btnSolo').onclick = () => openLobby(true);
+  // The tutorial is its own way in, not a tick-box on an ordinary game.
+  $('btnTutor').onclick = () => { wantTutorial = true; openLobby(true); };
   $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) showTab(b.dataset.t); };
   $('btnAgain').onclick = () => {
     $('over').style.display = 'none'; $('hud').style.display = 'none'; $('start').style.display = 'flex';
+    MUSTER.start();
   };
 }
 
@@ -2467,7 +2590,8 @@ function startMatch(){
   capitalMarks = null;
   // The herald teaches solo only — a lobby of other people is no place to be
   // reading. It offers itself on a first visit and remembers being dismissed.
-  if (!NET.online && $('cbHerald').checked) HERALD.begin(); else HERALD.stop(false);
+  if (!NET.online && wantTutorial) HERALD.begin(true); else HERALD.stop(false);
+  wantTutorial = false;
   banner('Choose your ground', 'click anywhere on land — the faded seats are powers that will rise there', 6000);
 }
 
@@ -2519,7 +2643,11 @@ function frame(now){
   requestAnimationFrame(frame);
   const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
   last = now;
-  if (game && !NET.online && game.phase === 'war' && running){
+  // The tutorial holds the war still while it is waiting on an order, so a new
+  // player can read the instruction without the map moving underneath them.
+  // `HERALD.held` is false in every other circumstance — an ordinary solo game
+  // and an online match are untouched by this.
+  if (game && !NET.online && game.phase === 'war' && running && !HERALD.held){
     acc += dt;
     const step = 1 / CFG.TICK_HZ;
     let n = 0;

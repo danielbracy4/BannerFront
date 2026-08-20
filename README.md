@@ -106,6 +106,8 @@ tools/sim.js|.sh      headless balance harness
 tools/readiness.js    do lords prepare before they go to war?
 tools/battle.js       does arming decide a fight, and does a front stay joined?
 tools/capacity.js     is the building ceiling real, and does the AI obey it?
+tools/lobby.js        the muster clock, the roll-call and the scatter
+tools/lords.js        are the lords different lords, and is a poor one poor?
 tools/roads.js        roads, caravans, trade and supply
 tools/botsense.js     do the lords' decisions cohere?
 tools/tempo.js        how fast does ground change hands, and does host size help?
@@ -268,6 +270,60 @@ cheapens again the moment the ceiling rises.
 a lord with a hundred million ducats and nine hundred open fields builds exactly
 its cap and no more, and that across three thousand AI purchases not one work was
 raised by a lord already at its limit.
+
+## The muster, and how big a war is
+
+One lobby stands open at all times — created when the server boots, reopened the
+moment the last one marches off. The title screen polls `/api/lobby` and shows
+it before a player has joined anything, which is the difference between "start a
+lobby" and "join the one that is running".
+
+A war is **20 to 90 lords in total**, rolled once when the muster opens. Players
+take places first and the machine fills the remainder: four players in a war of
+sixty is fifty-six AI, not sixty-four lords. Confusing the target with the AI
+count is how a lobby quietly ends up bigger than it says it is, and `aiFill` is
+the only thing that ever answers "how many bots".
+
+**An empty muster never marches.** With the lobby standing open permanently, a
+clock that started a match at zero regardless would have the server fighting
+itself every sixty seconds for ever; instead it winds back, draws a fresh war,
+and goes on waiting.
+
+## The lords
+
+Every lord is dealt a **calibre** and a **bent**, and between them they decide
+how well it plays and what it is trying to do.
+
+| calibre | share | | bent | share | wants |
+|---|---|---|---|---|---|
+| raw | 26% | | settler | 30% | empty ground over a war |
+| ordinary | 34% | | builder | 24% | works, and to keep them |
+| seasoned | 26% | | raider | 32% | its neighbours, early |
+| formidable | 14% | | warlord | 14% | what every lord used to |
+
+Calibre is competence and **never a subsidy** — no tier is handed extra men,
+coin, arms or output, and `tools/lords.js` asserts that every lord starts a match
+identical. What a poor lord does instead is dither, over-commit, and leave its
+walls thin.
+
+Two findings worth keeping:
+
+**Caution is not competence, in this game.** The first cut made skilled lords
+*wait longer* before marching — a full armoury against a raw lord's half. Measured
+head to head on identical ground it inverted the difficulty: the careful lord
+finished holding **0.91x** the ground of the careless one, and was sometimes
+overrun before it moved at all. Tempo beats preparation here. With that rule
+removed and skill living only where it genuinely helps, the same duel runs
+**1.40x** the other way.
+
+**A weakness has to still be a lord playing.** Expressing poor discipline by
+latching `wantWar` on meant a raw lord mobilised for ever, spent every coin on
+musters and finished a whole match having built one work. That is not a weak
+opponent, it is a broken one.
+
+Note that calibre cannot be read off a field of sixty: where a lord spawns swings
+its fortunes several times harder than how well it plays, and drowns the signal.
+`tools/lords.js` settles it with a duel on identical mirrored ground instead.
 
 ## Levies, soldiers and arms
 

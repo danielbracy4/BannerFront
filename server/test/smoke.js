@@ -58,8 +58,12 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check(!!lob, 'lobby broadcast received');
   check(lob && lob.humans.length === 2, `both humans seated (got ${lob ? lob.humans.length : 0})`);
   check(lob && lob.seconds > 0 && lob.seconds <= 60, `countdown running (${lob && lob.seconds}s)`);
-  check(lob && lob.ai >= core.CFG.AI_MIN && lob.ai <= core.CFG.AI_MAX,
-        `the muster raises ${lob && lob.ai} AI lords, inside ${core.CFG.AI_MIN}–${core.CFG.AI_MAX}`);
+  // The lobby reports the size of the *match* and how much of it the machine
+  // must supply. Humans take slots first, so the fill is the remainder.
+  check(lob && lob.lords >= core.CFG.LORDS_MIN && lob.lords <= core.CFG.LORDS_MAX,
+        `the match is set at ${lob && lob.lords} lords, inside ${core.CFG.LORDS_MIN}–${core.CFG.LORDS_MAX}`);
+  check(lob && lob.ai === lob.lords - lob.humans.length,
+        `and the machine fills the ${lob && lob.ai} slots the ${lob && lob.humans.length} players did not take`);
   check(lob && lob.map === 'europe', `on Europe (${lob && lob.map})`);
   check(lob && lob.capacity === core.CFG.MAX_HUMANS, `with ${lob && lob.capacity} seats at the table`);
   check(lob && lob.starting === null, 'and it is not starting yet');
