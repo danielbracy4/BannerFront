@@ -39,11 +39,15 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const url = `http://localhost:${PORT}`;
   const A = io(url, { transports: ['websocket'] });
   const B = io(url, { transports: ['websocket'] });
-  const seen = { lobby: [], start: null, states: 0, lastState: null, over: null };
+  // `sawOwners` accumulates rather than sampling the last broadcast: ownership
+  // deltas are only sent on ticks where ground actually changed hands, so a
+  // single quiet tick at the moment we happen to look proves nothing and fails
+  // a server that is working perfectly.
+  const seen = { lobby: [], start: null, states: 0, lastState: null, over: null, sawOwners: 0 };
 
   A.on('lobby', m => seen.lobby.push(m));
   A.on('start', m => { seen.start = m; });
-  A.on('state', m => { seen.states++; seen.lastState = m; });
+  A.on('state', m => { seen.states++; seen.lastState = m; if (Array.isArray(m.owners)) seen.sawOwners++; });
   A.on('over',  m => { seen.over = m; });
 
   await new Promise(r => A.on('connect', r));
@@ -172,7 +176,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check(seen.states > 3, `state deltas arriving (${seen.states} in ~2.5s at 5 Hz)`);
   const st = seen.lastState;
   check(st && Array.isArray(st.lords) && st.lords.length > 2, 'per-lord stats included');
-  check(st && Array.isArray(st.owners), 'ownership deltas included');
+  check(seen.sawOwners > 0, `ownership deltas arriving (${seen.sawOwners} of ${seen.states} broadcasts carried one)`);
 
   const before = st.lords[myLord];
   check(before && before[1] > 0, `my realm holds ground (${before && before[1]} fields)`);

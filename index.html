@@ -202,6 +202,66 @@
   /* ---------- overlays ---------- */
   .over{position:absolute;inset:0;z-index:20;display:flex;align-items:center;
     justify-content:center;background:radial-gradient(ellipse at center,#1c1710f2,#080605fa)}
+
+  /* The title screen sits on Leonardo's horse studies — sepia ink on paper he
+     laid down around 1490, which is the century this game is set in and very
+     nearly the palette the map is already drawn in. Public domain, and kept in
+     the repo rather than hotlinked so the screen cannot be broken by somebody
+     else's server.
+
+     Two layers over it: a wash in the vellum brown to pull the paper toward the
+     rest of the game, and a heavy vignette so the card and its text keep their
+     contrast wherever the drawing happens to be light. */
+  /* The drawing is portrait and a screen is not, so filling the whole width
+     with it crops away everything worth looking at and leaves blank paper. It
+     is hung as a matched pair instead — one either side of the card, the right
+     one mirrored — which fits a wide screen, keeps a horse's head in view at
+     any size, and leaves the middle clear for the lettering. */
+  #start{ background:#0b0908; overflow:hidden }
+  /* 54% each, so the pair overlaps in the middle: at 46% they left an 8% strip
+     of bare background showing as a dark seam straight down the centre of the
+     screen. The horizontal position picks the upper-left of the sheet, which is
+     where the big modelled head is — the middle of the sheet is mostly bare
+     paper and reads as a stain rather than a drawing. */
+  #start::before, #start::after{
+    content:'';position:absolute;top:-2%;bottom:-2%;width:56%;pointer-events:none;
+    /* Sized off the height and anchored to the top-left, which is where the two
+       modelled heads are. `cover` kept choosing its own crop and landing on the
+       bare middle of the sheet, so the screen was all paper and no horse. */
+    background:url('assets/leonardo-horses.jpg') left top / auto 116% no-repeat;
+    opacity:.95;
+    /* The inner edge is feathered away rather than cut, or the two sheets meet
+       in a hard tonal step straight down the middle of the screen. */
+    -webkit-mask-image:linear-gradient(90deg, #000 0%, #000 52%, transparent 96%);
+    mask-image:linear-gradient(90deg, #000 0%, #000 52%, transparent 96%);
+    animation:drift 52s ease-in-out infinite alternate;
+  }
+  #start::before{ left:0 }
+  #start::after{ right:0; transform:scaleX(-1); animation-delay:-26s }
+  /* The wash and the vignette sit over the pair. */
+  #startVeil{
+    position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(ellipse 52% 70% at 50% 50%, rgba(9,7,5,.92) 0%, rgba(9,7,5,.46) 52%, rgba(9,7,5,0) 100%),
+      linear-gradient(90deg, rgba(7,6,4,.80) 0%, rgba(7,6,4,0) 26%, rgba(7,6,4,0) 74%, rgba(7,6,4,.80) 100%),
+      linear-gradient(180deg, rgba(7,6,4,.55) 0%, rgba(7,6,4,0) 22%, rgba(7,6,4,0) 74%, rgba(7,6,4,.72) 100%),
+      linear-gradient(180deg, rgba(58,42,22,.10), rgba(16,12,8,.24));
+  }
+  @keyframes drift{ from{transform:scale(1)} to{transform:scale(1.07)} }
+  #start::after{ animation-name:driftFlip }
+  @keyframes driftFlip{ from{transform:scaleX(-1) scale(1)} to{transform:scaleX(-1) scale(1.07)} }
+  @media (prefers-reduced-motion: reduce){ #start::before,#start::after{animation:none} }
+  @media (max-width: 760px){ #start::before,#start::after{opacity:.34} }
+  #start .card{position:relative;z-index:1}
+  /* A dark plate behind the card so the lettering never has to fight the
+     drawing underneath it. */
+  #start .card::before{
+    content:'';position:absolute;inset:-30px -34px;z-index:-1;border-radius:3px;
+    background:radial-gradient(ellipse at center, rgba(12,9,6,.94) 0%, rgba(12,9,6,.86) 52%, rgba(12,9,6,.30) 84%, rgba(12,9,6,0) 100%);
+    backdrop-filter:blur(2px);
+  }
+  #credit{position:absolute;left:0;right:0;bottom:8px;text-align:center;z-index:1;
+    font-size:9.5px;letter-spacing:.09em;color:#6a5c3f;opacity:.75}
   .card{width:min(640px,92vw);padding:34px 40px 30px;text-align:center}
   .card h1{font-size:46px;letter-spacing:.16em;font-weight:400;color:#f2e6c6;
     text-shadow:0 2px 0 #000,0 0 30px #b8912f40}
@@ -373,6 +433,7 @@
 </div>
 
 <div class="over" id="start">
+  <div id="startVeil"></div>
   <div class="card panel">
     <h1>BANNER<span>FRONT</span></h1>
     <div class="tag">Claim the realm, one field at a time</div>
@@ -380,22 +441,11 @@
        the markets — and an army is only ever what that economy can arm and pay for.
        Take <b id="wintxt">65%</b> of the realm, or be the last banner flying.</p>
     <div class="fields">
-      <div class="fld"><label>Your house</label><input id="inName" maxlength="18" placeholder="House Vareth"></div>
-      <!-- How many lords is no longer a setting: every match rolls its own size
-           when the muster opens, so no two wars are the same. That number is
-           the whole field — players first, the machine filling the rest. -->
-      <div class="fld"><label>Lords in the war</label>
-        <div id="inBots" class="fldstatic">20–90, drawn at the muster</div>
-      </div>
-      <!-- Europe is the only realm in rotation while it is being tuned. The
-           other presets still exist in shared/core.js and are simply not
-           offered; putting them back is a matter of listing them here. -->
-      <div class="fld"><label>Realm</label>
-        <select id="inMap" disabled title="Europe is the only realm in rotation">
-          <option value="europe" selected>Europe, 1300</option>
-        </select>
-      </div>
-      <div class="fld" style="flex:1 1 100%"><label>Colours</label><div id="swatches"></div></div>
+      <!-- Nothing to choose but who you are. The realm is Europe and the size
+           of the war is drawn at the muster, so both are reported on the notice
+           below rather than sat here as controls that do nothing. -->
+      <div class="fld" style="flex:2 1 200px"><label>Your house</label><input id="inName" maxlength="18" placeholder="House Vareth"></div>
+      <div class="fld" style="flex:3 1 240px"><label>Colours</label><div id="swatches"></div></div>
     </div>
     <!-- The standing muster. A lobby is always open on the server, so it is
          shown here before anyone has committed to anything — you can see who is
@@ -440,6 +490,9 @@
     <div class="hint">drag to pan · scroll to zoom · left-click to march · right-click for orders</div>
     <div class="build" id="buildlab">—</div>
   </div>
+  <!-- Public domain, but credited anyway: it costs a line and it is somebody's
+       drawing. -->
+  <div id="credit">Leonardo da Vinci · Studies of horses and horses' heads, c.1490 · public domain</div>
 </div>
 
 <div class="over" id="lobby" style="display:none">
