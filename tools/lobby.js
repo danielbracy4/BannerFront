@@ -65,10 +65,16 @@ console.log('  ...unless it fills');
 {
   const net = io();
   const r = new Room(net, {});
-  for (let i = 0; i < MAX_HUMANS - 1; i++) r.addSeat(fakeSocket('s' + i), 'Lord ' + i, null, null);
-  ok(!r.isFull && !r.mayStart, `${MAX_HUMANS - 1} of ${MAX_HUMANS} seats is not full`);
+  // Every slot in the match is open to a player, so a lobby is full at the size
+  // of the war rather than at some smaller table. It used to seat twelve.
+  ok(r.capacity === r.targetLords,
+     `a match of ${r.targetLords} lords opens ${r.capacity} seats to players`);
+  for (let i = 0; i < r.capacity - 1; i++) r.addSeat(fakeSocket('s' + i), 'Lord ' + i, null, null);
+  ok(!r.isFull && !r.mayStart, `${r.capacity - 1} of ${r.capacity} seats is not full`);
+  ok(r.aiFill === 1, `and the machine is down to filling ${r.aiFill} slot`);
   r.addSeat(fakeSocket('last'), 'Last Lord', null, null);
   ok(r.isFull, 'the last seat fills the lobby');
+  ok(r.aiFill === 0, 'with nothing left for the machine to fill');
   ok(r.mayStart && r.startReason === 'full', 'which is a reason to start early');
   clearInterval(r.lobbyTimer);
 }

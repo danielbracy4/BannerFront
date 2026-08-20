@@ -1568,6 +1568,63 @@ class Game {
     return out;
   }
 
+  // Seat these lords on ground dealt at random, then name them for where they
+  // landed. One function because the two halves have to agree: the name is
+  // chosen from the seat, so seating has to have happened first.
+  //
+  // Used by the solo client and by the server alike. They used to seat lords by
+  // different rules — solo put the powers on their historical capitals while
+  // the server scattered everyone — which meant the same game played two
+  // different ways depending on how you started it.
+  seatLords(lords){
+    const spots = this.pickSeats(lords.length);
+    lords.forEach((p, i) => { if (i < spots.length) this.seat(p, spots[i]); });
+    this.nameBySeat(lords);
+    return spots.length;
+  }
+
+  // A house is named for the country it actually rose in.
+  //
+  // Seats are dealt at random so no two matches are alike, but a lord that
+  // lands in Iberia should be a Castile or a Granada, not a Novgorod — the
+  // powers of the age are the best part of the Europe map and they are wasted
+  // if France turns up on the Volga. So each lord takes the name of whichever
+  // power rose nearest to where it landed, provided that power is close enough
+  // to be plausible; anything seated out in open country beyond them all is
+  // named for its region and its year instead, which is what makeHouseName is
+  // for. Each power may only be claimed once.
+  nameBySeat(lords){
+    if (this.preset !== 'europe') return;
+    const REACH = 7.5;                 // degrees — about how far a crown's writ ran
+    const taken = new Set(), used = new Set();
+    for (const p of this.players) if (!p.bot) used.add(p.name);
+    // Big realms choose first, so the great powers land on the great holdings
+    // rather than on whoever happened to be first in the list.
+    const order = lords.filter(p => p.bot && p.tiles > 0).sort((a, b) => b.tiles - a.tiles);
+    for (const p of order){
+      const [lon, lat] = this.seatDegrees(Math.round(p.cy) * this.W + Math.round(p.cx));
+      let best = -1, bestD = 1e9;
+      for (let i = 0; i < POWERS.length; i++){
+        if (taken.has(i)) continue;
+        // longitude narrows as you go north, or everything in Scandinavia
+        // looks equidistant from everything else
+        const dx = (POWERS[i][1] - lon) * Math.cos(lat * Math.PI / 180);
+        const dy = POWERS[i][2] - lat;
+        const d = Math.hypot(dx, dy);
+        if (d < bestD){ bestD = d; best = i; }
+      }
+      if (best >= 0 && bestD <= REACH && !used.has(POWERS[best][0])){
+        taken.add(best); used.add(POWERS[best][0]);
+        p.name = POWERS[best][0];
+        p.home = [POWERS[best][1], POWERS[best][2]];
+      } else {
+        let n = makeHouseName(this.rand, [lon, lat], this.startYear);
+        for (let k = 0; k < 40 && used.has(n); k++) n = makeHouseName(this.rand, [lon, lat], this.startYear);
+        used.add(n); p.name = n; p.home = [lon, lat];
+      }
+    }
+  }
+
   // Casualties fall on the men under arms first, and only reach the civilian
   // population once an army has been destroyed outright.
   bleed(p, n){

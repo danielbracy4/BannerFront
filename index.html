@@ -1912,9 +1912,14 @@ function onServerOver(m){
 // VERSION gates the guide: a player who ticked "don't show this again" sees it
 // once more whenever this string changes. BUMP IT WITH EVERY RELEASE, and add
 // the matching CHANGELOG entry — that is the whole mechanism.
-const VERSION = '0.18.0';
+const VERSION = '0.19.0';
 
 const CHANGELOG = [
+  { v:'0.19.0', when:'every seat is a player\u2019s seat', notes:[
+    '<b>The whole war is open to players.</b> A muster of sixty-one lords now seats sixty-one people, not twelve. The machine fills only what is still empty when the horn sounds — twenty players in a war of sixty-one means forty-one AI, and the lobby shows the fill falling as each of you arrives.',
+    '<b>The powers rise where they belong.</b> Ground is still dealt at random, so no two wars are alike, but a house now takes the name of whichever crown of the age rose nearest to where it landed: Muscovy on the Volga, Portugal in Iberia, Navarre under the Pyrenees. Averaged over a hundred seatings, a house rises about 300km from its real seat. Land somewhere no crown ever held and you are named for that country and that year instead.',
+    'Fixed: solo seated its lords by different rules to an online match \u2014 the powers went to their historical capitals there and were scattered here, so the same game was laid out two ways depending on how you started it.',
+  ]},
   { v:'0.18.0', when:'the muster, the tutorial and the field', notes:[
     '<b>A muster always stands open.</b> The title screen shows it before you commit to anything — the realm, who is waiting, how big the war will be, and the clock. You no longer start a lobby; you join the one that is already running.',
     'An empty muster <b>never marches</b>. If the minute runs out with nobody there the clock winds back and a fresh war is drawn, rather than the server fighting itself.',
@@ -2651,13 +2656,11 @@ function startMatch(){
 function beginWar(tile){
   const me = game.players[game.humanId];
   game.seat(me, tile);
-  const bots = game.players.filter(p => p.bot);
-  const minDist = Math.max(9, Math.sqrt(game.landCount / (bots.length + 2)) * 0.85);
-  for (const b of bots){
-    const home = b.home ? game.seatAtHome(b) : -1;   // the powers start at home
-    const t = home >= 0 ? home : game.pickSeat(minDist);
-    if (t >= 0) game.seat(b, t);
-  }
+  // The same dealing the server uses: unique ground at random, then each lord
+  // named for the country it landed in. Solo used to seat the powers on their
+  // historical capitals instead, so a solo match and an online one were laid
+  // out by different rules.
+  game.seatLords(game.players.filter(p => p.bot));
   game.audit();
   game.phase = 'war';
   cam.x = tile % game.W; cam.y = (tile / game.W) | 0;

@@ -347,6 +347,28 @@ Measured with 1,000 soldiers and 4,000 levies: an armoury of 1,000 arms the
 soldiers and none of the levy; 3,000 arms half of it; 5,000 all of it — and the
 ground the realm holds gets 3.3x harder to take across that range.
 
+## Who rises where
+
+Seats are dealt at random from one shuffled pool of valid ground, so no two
+matches are laid out alike and no two lords can be handed the same field. The
+*names* then follow the ground: each lord takes whichever power of the age rose
+nearest to where it landed, if one rose within about 7.5 degrees, and each power
+may be claimed only once. Anything seated out beyond them all is named for its
+region and its year by `makeHouseName` instead.
+
+That keeps both halves. The scatter is what stops every match being the same
+match; the naming is what stops France turning up on the Volga. Measured over
+109 seatings across three matches, a historical house rises an average of 2.7
+degrees — about 300km — from its real capital, and none beyond the reach.
+
+Big realms choose first, so the great crowns land on the great holdings rather
+than on whoever happened to be first in the array.
+
+`Game.seatLords()` does both, and the solo client and the server both call it.
+They used to disagree: solo put the powers on their historical capitals while
+the server scattered everyone, so the same game was laid out two different ways
+depending on how you started it.
+
 ## Roads, trade and supply
 
 Works — farms, forges, towns, castles, harbours — are the **nodes** of a network,

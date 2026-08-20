@@ -22,7 +22,7 @@ const BROADCAST_HZ = 5;                // deltas to clients twice per tick
 const LOBBY_SECS   = Math.max(1, +process.env.BANNERFRONT_LOBBY_SECS || CFG.LOBBY_SECS);
 const PLACE_SECS   = 25;               // time to choose your ground
 const PLACE_MIN    = 16;               // fields between rival standards
-const MAX_HUMANS   = CFG.MAX_HUMANS;   // seats at the table; the lobby is full at this
+const MAX_HUMANS   = CFG.MAX_HUMANS;   // only a display hint now; capacity is the match size
 const LORDS_MIN    = CFG.LORDS_MIN;    // the *total* size of a match, humans included
 const LORDS_MAX    = CFG.LORDS_MAX;
 const MAX_LORDS    = LORDS_MAX;
@@ -42,8 +42,11 @@ class Room {
     // whatever the players do not take. Everything downstream reads it rather
     // than deciding for itself.
     this.targetLords = LORDS_MIN + Math.floor(Math.random() * (LORDS_MAX - LORDS_MIN + 1));
-    // A lobby never holds more players than the match has room for.
-    this.capacity = Math.min(MAX_HUMANS, this.targetLords);
+    // Every slot in the match is a slot a player may take. The machine only
+    // ever fills what is left over at the moment the war begins, so a lobby of
+    // fifty players is a match of fifty players — it does not sit twelve people
+    // down beside a crowd of bots that were decided in advance.
+    this.capacity = this.targetLords;
 
     this.phase = 'lobby';              // lobby -> placing -> war -> done
     this.seats = [];                   // { socketId, name, colour, lordId }
@@ -131,7 +134,7 @@ class Room {
       this.startsAt = this.openedAt + LOBBY_SECS * 1000;
       // A fresh wait is a fresh match: roll its size again.
       this.targetLords = LORDS_MIN + Math.floor(Math.random() * (LORDS_MAX - LORDS_MIN + 1));
-      this.capacity = Math.min(MAX_HUMANS, this.targetLords);
+      this.capacity = this.targetLords;
       this.seed = (Math.random() * 1e9) | 0;
     }
     this.sendLobby();
@@ -251,13 +254,12 @@ class Room {
     for (const p of g.players)
       if (!p.tiles && !waiting.includes(p)) waiting.push(p);
 
-    const spots = g.pickSeats(waiting.length);
-    if (spots.length < waiting.length){
+    const got = g.seatLords(waiting);
+    if (got < waiting.length){
       // Fewer usable fields than lords. Seat who can be seated and let the rest
       // fall, rather than stacking two standards on one field.
-      console.log(`  room ${this.id}: only ${spots.length} seats for ${waiting.length} lords`);
+      console.log(`  room ${this.id}: only ${got} seats for ${waiting.length} lords`);
     }
-    waiting.forEach((p, i) => { if (i < spots.length) g.seat(p, spots[i]); });
     g.audit();
 
     const ai = g.players.filter(p => p.bot && p.alive).length;

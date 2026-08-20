@@ -69,7 +69,11 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check(lob && lob.ai === lob.lords - lob.humans.length,
         `and the machine fills the ${lob && lob.ai} slots the ${lob && lob.humans.length} players did not take`);
   check(lob && lob.map === 'europe', `on Europe (${lob && lob.map})`);
-  check(lob && lob.capacity === core.CFG.MAX_HUMANS, `with ${lob && lob.capacity} seats at the table`);
+  // Every slot in the match is open to a player; the machine only fills what is
+  // left when the horn sounds. So the table is as big as the war, not a fixed
+  // dozen with bots decided in advance.
+  check(lob && lob.capacity === lob.lords,
+        `with all ${lob && lob.capacity} seats open to players`);
   check(lob && lob.starting === null, 'and it is not starting yet');
   const advertisedAI = lob && lob.ai;
 
